@@ -1,322 +1,317 @@
 package Project.demo.Component;
 
-import Project.demo.Entity.ExerciseHistory;
-import Project.demo.Service.ExerciseHistoryServiceImplementation;
-import lombok.Getter;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.io.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class QLearningAgent {
-    // Difficulty levels
-    public static final String BEGINNER = "Beginner";
-    public static final String INTERMEDIATE = "Intermediate";
-    public static final String ADVANCED = "Advanced";
-    private static final String[] DIFFICULTY_LEVELS = {BEGINNER, INTERMEDIATE, ADVANCED};
 
-    // Performance levels (aligned with state representation)
-    private static final String LOW_PERFORMANCE = "Low";
-    private static final String MEDIUM_PERFORMANCE = "Medium";
-    private static final String HIGH_PERFORMANCE = "High";
+    // Hyperparameters
+    private static final double LEARNING_RATE = 0.2; // How much new information overrides old. Higher = faster learning.
+    private static final double DISCOUNT_FACTOR = 0.9; // Importance of future rewards. Closer to 1 = values future more.
+    private static final double EXPLORATION_RATE_INITIAL = 0.2; // Initial chance of choosing a random action (difficulty)
+    private static final double EXPLORATION_RATE_DECAY = 0.995; // Rate at which exploration decreases over time
+    private static final double EXPLORATION_RATE_MIN = 0.05; // Minimum exploration rate
 
-    // Q-table: Map<State, Map<Action, Q-value>>
-    private final Map<String, Map<String, Double>> qTable = new HashMap<>();
+    // Define valid difficulty levels and map them to numerical states/actions
+    private static final List<String> VALID_DIFFICULTIES = Arrays.asList("Beginner", "Intermediate", "Advanced");
+    private static final String DEFAULT_DIFFICULTY = "Beginner"; // Used for new users or fallbacks
+    private static final int NUM_DIFFICULTIES = VALID_DIFFICULTIES.size();
 
-    // Learning parameters
-    private final double alpha = 0.1; // Learning rate
-    private final double gamma = 0.9; // Discount factor
+    // Q-table: Map<userId, double[][]>
+    private final ConcurrentHashMap<String, double[][]> qTables;
+    // Map to track the *last chosen difficulty (action)* for each user
+    // This is needed because the 'update' happens after the action (choosing difficulty) has been made and performance observed.
+    private final ConcurrentHashMap<String, Integer> userLastChosenDifficultyIndex;
+    // Map to track the user's current exploration rate
+    private final ConcurrentHashMap<String, Double> userExplorationRates;
 
-    @Getter
-    private double epsilon = 1.0; // Exploration rate
-    private final double minEpsilon = 0.05;
-    private final double decayRate = 0.995;
+    // File path for Q-table persistence
+    private static final String Q_TABLE_FILE = "q_tables.ser";
 
-    // Thresholds
-    private static final int MIN_QUESTIONS_FOR_EVALUATION = 5;
-    private static final double HIGH_SCORE_THRESHOLD = 80.0;
-    private static final double LOW_SCORE_THRESHOLD = 60.0;
-
-    private final ProficiencyTracker proficiencyTracker;
-    private final ExerciseHistoryServiceImplementation exerciseHistoryService;
-    private final Map<String, String> userDifficultyMap = new HashMap<>();
-
-    @Autowired
-    public QLearningAgent(ProficiencyTracker proficiencyTracker,
-                          ExerciseHistoryServiceImplementation exerciseHistoryService) {
-        this.proficiencyTracker = proficiencyTracker;
-        this.exerciseHistoryService = exerciseHistoryService;
-        initializeQTable();
+    public QLearningAgent() {
+        this.qTables = loadQTables();
+        this.userLastChosenDifficultyIndex = new ConcurrentHashMap<>();
+        this.userExplorationRates = new ConcurrentHashMap<>();
+        System.out.println("QLearningAgent initialized. Loaded " + qTables.size() + " Q-tables.");
     }
 
-    private void initializeQTable() {
-        // Initialize Q-table with all possible state-action pairs
-        String[] performanceLevels = {LOW_PERFORMANCE, MEDIUM_PERFORMANCE, HIGH_PERFORMANCE};
+    /**
+     * Initializes a Q-table for a new user.
+     * All Q-values are initialized to 0.0.
+     * @return A new Q-table (double[][]) initialized with zeros.
+     */
+    private double[][] initializeQTable() {
+        double[][] qTable = new double[NUM_DIFFICULTIES][NUM_DIFFICULTIES];
+        for (int i = 0; i < NUM_DIFFICULTIES; i++) {
+            Arrays.fill(qTable[i], 0.0);
+        }
+        return qTable;
+    }
 
-        for (String performance : performanceLevels) {
-            for (String difficulty : DIFFICULTY_LEVELS) {
-                String state = createState(difficulty, performance);
-                qTable.put(state, new HashMap<>());
+    /**
+     * Converts a difficulty string to its corresponding index.
+     * @param difficulty The difficulty string (e.g., "Beginner").
+     * @return The index (0 for Beginner, 1 for Intermediate, 2 for Advanced) or 0 (Beginner) if invalid.
+     */
+    private int getDifficultyIndex(String difficulty) {
+        int index = VALID_DIFFICULTIES.indexOf(difficulty);
+        return index != -1 ? index : VALID_DIFFICULTIES.indexOf(DEFAULT_DIFFICULTY);
+    }
 
-                // Initialize all possible actions (difficulty levels) with small random values
-                for (String action : DIFFICULTY_LEVELS) {
-                    // Small random initialization to encourage exploration
-                    qTable.get(state).put(action, Math.random() * 0.1);
-                }
+    /**
+     * Converts a difficulty index to its corresponding string.
+     * @param index The index (0, 1, or 2).
+     * @return The corresponding difficulty string or DEFAULT_DIFFICULTY if index is out of bounds.
+     */
+    private String getDifficultyFromIndex(int index) {
+        if (index >= 0 && index < NUM_DIFFICULTIES) {
+            return VALID_DIFFICULTIES.get(index);
+        }
+        return DEFAULT_DIFFICULTY;
+    }
+
+    /**
+     * Calculates the reward based on the average score from a cycle.
+     * A higher score gives a positive reward, a score of 0 gives a strong negative reward.
+     * This is crucial for guiding the learning.
+     * @param averageScore The average score (0-100) from the completed cycle.
+     * @return The calculated reward.
+     */
+    private double calculateReward(double averageScore) {
+        double normalizedScore = averageScore / 100.0;
+
+        if (normalizedScore >= 0.9) { // Perfect or near-perfect score
+            return 10.0; // Strong positive reward
+        } else if (normalizedScore >= 0.6) { // Good score (e.g., > 60%)
+            return 5.0;  // Moderate positive reward
+        } else if (normalizedScore > 0.0) { // Partial score (e.g., 1% - 59%)
+            return -2.0; // Small penalty for not mastering
+        } else { // Score is 0
+            // Apply a significant penalty for incorrect answers.
+            return -20.0; // Strong negative penalty to really push down
+        }
+    }
+
+
+    /**
+     * Determines the *next recommended difficulty* for a user based on their last known state
+     * (which is implicitly updated via `updateQValuesAfterCycle`). This method uses
+     * an epsilon-greedy policy.
+     * This method is called by `ExerciseServiceImpl` when starting a new question cycle.
+     *
+     * @param userId The ID of the user.
+     * @return The recommended difficulty string ("Beginner", "Intermediate", "Advanced").
+     */
+    public String determineNextDifficulty(String userId) {
+        double[][] qTable = qTables.computeIfAbsent(userId, k -> initializeQTable());
+        double currentExplorationRate = userExplorationRates.computeIfAbsent(userId, k -> EXPLORATION_RATE_INITIAL);
+
+        // The 'current state' for selection is the last difficulty the agent *recommended*
+        // and which the user *experienced*. If new user, start at Beginner state.
+        int currentStateIndex = userLastChosenDifficultyIndex.getOrDefault(userId, getDifficultyIndex(DEFAULT_DIFFICULTY));
+
+
+        int chosenActionIndex; // This is the difficulty we will recommend
+        if (Math.random() < currentExplorationRate) {
+            // Exploration: Choose a random difficulty
+            chosenActionIndex = new Random().nextInt(NUM_DIFFICULTIES);
+            System.out.println("User " + userId + ": Exploring, chose random difficulty " + getDifficultyFromIndex(chosenActionIndex) + " (Exp. Rate: " + String.format("%.2f", currentExplorationRate) + ")");
+        } else {
+            // Exploitation: Choose the difficulty with the highest Q-value from the current state
+            chosenActionIndex = getMaxAction(qTable, currentStateIndex);
+            System.out.println("User " + userId + ": Exploiting, chose difficulty " + getDifficultyFromIndex(chosenActionIndex) + " (Exp. Rate: " + String.format("%.2f", currentExplorationRate) + ")");
+        }
+
+        // Store this chosen difficulty index. It will be the 'action' in the next update.
+        userLastChosenDifficultyIndex.put(userId, chosenActionIndex);
+
+        // Decay exploration rate
+        double newExplorationRate = Math.max(EXPLORATION_RATE_MIN, currentExplorationRate * EXPLORATION_RATE_DECAY);
+        userExplorationRates.put(userId, newExplorationRate);
+
+        return getDifficultyFromIndex(chosenActionIndex);
+    }
+
+    /**
+     * Updates the Q-value based on the user's performance for the completed cycle.
+     * This method is called *after* a full evaluation cycle (e.g., 2 questions) is completed.
+     *
+     * @param userId The ID of the user.
+     * @param averageScore The average score (0-100) from the completed evaluation cycle.
+     * @param difficultyServedInCycle The difficulty level of the questions that were served during this cycle.
+     */
+    public synchronized void updateQValuesAfterCycle(String userId, double averageScore, String difficultyServedInCycle) {
+        double[][] qTable = qTables.computeIfAbsent(userId, k -> initializeQTable());
+
+        // The state is the difficulty the user was *in* when they were served the questions
+        int currentStateIndex = getDifficultyIndex(difficultyServedInCycle);
+
+        // The action is the difficulty that was *chosen* for the user to practice (which is `difficultyServedInCycle`)
+        // We ensure that the 'action' corresponds to the 'state' that was just experienced.
+        int actionTakenIndex = getDifficultyIndex(difficultyServedInCycle);
+
+
+        double reward = calculateReward(averageScore);
+
+        // Determine the 'next state' based on performance in this cycle
+        // This is a crucial part where performance dictates proficiency change.
+        int nextStateIndex = determineNextStateFromScore(averageScore, currentStateIndex);
+
+
+        // Q-learning formula:
+        // Q(s, a) = Q(s, a) + alpha * [reward + gamma * max(Q(s', a')) - Q(s, a)]
+        double oldQValue = qTable[currentStateIndex][actionTakenIndex];
+        double maxFutureQ = getMaxQValue(qTable, nextStateIndex); // Max Q-value for the *next* state
+
+        double newQValue = oldQValue + LEARNING_RATE * (reward + DISCOUNT_FACTOR * maxFutureQ - oldQValue);
+        qTable[currentStateIndex][actionTakenIndex] = newQValue;
+
+        // After updating Q-values, set the user's *actual new proficiency level* as their
+        // last chosen difficulty, so that the next `determineNextDifficulty` call
+        // starts from this new adjusted level.
+        userLastChosenDifficultyIndex.put(userId, nextStateIndex);
+
+
+        System.out.println("--- Q-Value Update for User " + userId + " ---");
+        System.out.println("Current State (Served Difficulty): " + getDifficultyFromIndex(currentStateIndex));
+        System.out.println("Action Taken (Served Difficulty): " + getDifficultyFromIndex(actionTakenIndex));
+        System.out.println("Average Score: " + averageScore);
+        System.out.println("Calculated Reward: " + reward);
+        System.out.println("Next State (Determined from Score): " + getDifficultyFromIndex(nextStateIndex));
+        System.out.println("Old Q(" + getDifficultyFromIndex(currentStateIndex) + ", " + getDifficultyFromIndex(actionTakenIndex) + "): " + String.format("%.2f", oldQValue));
+        System.out.println("Max Future Q(s', a'): " + String.format("%.2f", maxFutureQ));
+        System.out.println("New Q(" + getDifficultyFromIndex(currentStateIndex) + ", " + getDifficultyFromIndex(actionTakenIndex) + "): " + String.format("%.2f", newQValue));
+        System.out.println("Q-Table for " + userId + " (relevant row after update for " + getDifficultyFromIndex(currentStateIndex) + "): " + Arrays.toString(qTable[currentStateIndex]));
+
+        saveQTables(); // Persist the updated Q-table
+    }
+
+    /**
+     * Determines the 'next state' (user's new effective proficiency level) based on the current performance.
+     * This dictates whether the user's underlying "skill" level has improved, decreased, or stayed same.
+     * @param averageScore The average score for the evaluation cycle.
+     * @param currentStateIndex The index of the state (difficulty) the user was in.
+     * @return The index of the new state.
+     */
+    private int determineNextStateFromScore(double averageScore, int currentStateIndex) {
+        if (averageScore >= 80) { // High performance: user probably mastered this or is ready for next
+            return Math.min(currentStateIndex + 1, NUM_DIFFICULTIES - 1); // Advance to next difficulty
+        } else if (averageScore <= 50) { // Low performance: user struggled, needs easier questions
+            return Math.max(currentStateIndex - 1, 0); // Step down to easier difficulty
+        } else { // Moderate performance: user is at the right level or needs more practice here
+            return currentStateIndex; // Stay at same difficulty
+        }
+    }
+
+    /**
+     * Helper to find the maximum Q-value for a given state.
+     * @param qTable The Q-table.
+     * @param stateIndex The index of the state.
+     * @return The maximum Q-value from that state.
+     */
+    private double getMaxQValue(double[][] qTable, int stateIndex) {
+        if (stateIndex < 0 || stateIndex >= NUM_DIFFICULTIES) {
+            return 0.0;
+        }
+        return Arrays.stream(qTable[stateIndex]).max().orElse(0.0);
+    }
+
+    /**
+     * Helper to find the action (difficulty index) with the maximum Q-value for a given state.
+     * @param qTable The Q-table.
+     * @param stateIndex The index of the state.
+     * @return The index of the action with the highest Q-value.
+     */
+    private int getMaxAction(double[][] qTable, int stateIndex) {
+        if (stateIndex < 0 || stateIndex >= NUM_DIFFICULTIES) {
+            return getDifficultyIndex(DEFAULT_DIFFICULTY);
+        }
+        int bestAction = 0;
+        double maxQ = Double.NEGATIVE_INFINITY;
+        boolean allZero = true;
+
+        for (int i = 0; i < NUM_DIFFICULTIES; i++) {
+            if (qTable[stateIndex][i] != 0.0) {
+                allZero = false;
+            }
+            if (qTable[stateIndex][i] > maxQ) {
+                maxQ = qTable[stateIndex][i];
+                bestAction = i;
             }
         }
-    }
-
-    public String determineNextDifficulty(String userId) {
-        List<ExerciseHistory> history = exerciseHistoryService.fetchHistory(userId);
-        if (history.isEmpty()) {
-            return BEGINNER;
+        // If all Q-values are zero for this state, choose a random action to encourage initial exploration
+        if (allZero) {
+            return new Random().nextInt(NUM_DIFFICULTIES);
         }
-
-        String currentDifficulty = userDifficultyMap.getOrDefault(userId, BEGINNER);
-        double lastScore = history.get(history.size() - 1).getScore();
-        String performance = evaluatePerformance(lastScore);
-        String currentState = createState(currentDifficulty, performance);
-
-        // Choose action using ε-greedy policy
-        String action;
-        if (Math.random() < epsilon) {
-            // Exploration: random action
-            action = DIFFICULTY_LEVELS[(int) (Math.random() * DIFFICULTY_LEVELS.length)];
-        } else {
-            // Exploitation: best known action
-            action = getBestAction(currentState);
-        }
-
-        // Decay epsilon
-        decayEpsilon();
-
-        return action;
+        return bestAction;
     }
 
-    public void updateQValues(String userId) {
-        List<ExerciseHistory> history = exerciseHistoryService.fetchHistory(userId);
-        if (history.size() < 2) return; // Need at least two exercises for a transition
-
-        ExerciseHistory currentExercise = history.get(history.size() - 1);
-        ExerciseHistory previousExercise = history.get(history.size() - 2);
-
-        String previousDifficulty = userDifficultyMap.getOrDefault(userId, BEGINNER);
-        String previousPerformance = evaluatePerformance(previousExercise.getScore());
-        String previousState = createState(previousDifficulty, previousPerformance);
-
-        String currentDifficulty = determineNextDifficulty(userId);
-        String currentPerformance = evaluatePerformance(currentExercise.getScore());
-        String currentState = createState(currentDifficulty, currentPerformance);
-
-        // Calculate reward based on performance change and difficulty adjustment
-        double reward = calculateReward(
-                previousExercise.getScore(),
-                currentExercise.getScore(),
-                previousDifficulty,
-                currentDifficulty
-        );
-
-        // Get current Q-value for the previous state-action pair
-        double currentQ = qTable.get(previousState).getOrDefault(currentDifficulty, 0.0);
-
-        // Get maximum Q-value for current state
-        double maxNextQ = qTable.get(currentState).values().stream()
-                .max(Double::compare)
-                .orElse(0.0);
-
-        // Apply Q-learning update rule: Q(s,a) ← Q(s,a) + α[r + γ max Q(s',a') - Q(s,a)]
-        double updatedQ = currentQ + alpha * (reward + gamma * maxNextQ - currentQ);
-        qTable.get(previousState).put(currentDifficulty, updatedQ);
-
-        // Update user's current difficulty
-        userDifficultyMap.put(userId, currentDifficulty);
-    }
-
-    private double calculateReward(double previousScore, double currentScore,
-                                   String previousDifficulty, String currentDifficulty) {
-        double scoreChange = currentScore - previousScore;
-        int previousDiffValue = getDifficultyValue(previousDifficulty);
-        int currentDiffValue = getDifficultyValue(currentDifficulty);
-        int difficultyChange = currentDiffValue - previousDiffValue;
-
-        // Normalize score to [0,1] range
-        double normalizedScore = currentScore / 100.0;
-
-        // Reward components
-        double performanceReward = normalizedScore; // Higher scores are better
-        double difficultyReward = 0;
-
-        // Reward appropriate difficulty adjustments
-        if (normalizedScore > 0.8 && difficultyChange >= 0) {
-            // Good performance, encourage maintaining or increasing difficulty
-            difficultyReward = 0.5 * difficultyChange;
-        } else if (normalizedScore < 0.6 && difficultyChange <= 0) {
-            // Poor performance, encourage maintaining or decreasing difficulty
-            difficultyReward = 0.5 * -difficultyChange;
-        }
-
-        // Combine rewards with weights
-        return (0.7 * performanceReward) + (0.3 * difficultyReward);
-    }
-
-    // Helper methods remain the same
-    private String createState(String difficulty, String performance) {
-        return difficulty + "-" + performance;
-    }
-
-    private String evaluatePerformance(double score) {
-        if (score >= HIGH_SCORE_THRESHOLD) return HIGH_PERFORMANCE;
-        if (score <= LOW_SCORE_THRESHOLD) return LOW_PERFORMANCE;
-        return MEDIUM_PERFORMANCE;
-    }
-
-    private String getBestAction(String state) {
-        return qTable.getOrDefault(state, new HashMap<>()).entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(BEGINNER);
-    }
-
-    private int getDifficultyValue(String difficulty) {
-        return switch (difficulty) {
-            case BEGINNER -> 0;
-            case INTERMEDIATE -> 1;
-            case ADVANCED -> 2;
-            default -> 0;
-        };
-    }
-
-    private void decayEpsilon() {
-        epsilon = Math.max(minEpsilon, epsilon * decayRate);
-    }
-
-    public String getCurrentDifficulty(String userId) {
-        return userDifficultyMap.getOrDefault(userId, BEGINNER);
-    }
     /**
-     * Evaluates user proficiency and returns the recommended difficulty level
-     * @param userId The user to evaluate
-     * @return Recommended difficulty level (BEGINNER, INTERMEDIATE, or ADVANCED)
+     * Persists the Q-tables to a file.
      */
-    public String determineRecommendedProficiencyLevel(String userId) {
-        List<ExerciseHistory> history = exerciseHistoryService.fetchHistory(userId);
-
-        // Default to beginner if no history
-        if (history.isEmpty()) {
-            return BEGINNER;
-        }
-
-        String currentDifficulty = userDifficultyMap.getOrDefault(userId, BEGINNER);
-        double lastScore = history.get(history.size() - 1).getScore();
-        String performance = evaluatePerformance(lastScore);
-        String currentState = createState(currentDifficulty, performance);
-
-        // Get Q-learning's suggested action
-        String qLearningSuggestedLevel = determineNextDifficulty(userId);
-
-        // Calculate performance metrics
-        double averageScore = calculateWeightedAverageScore(history);
-        double consistencyScore = calculateConsistencyScore(history);
-        double recentImprovement = calculateRecentImprovement(history);
-
-        // Decision making process
-        if (shouldIncreaseDifficulty(currentDifficulty, qLearningSuggestedLevel, averageScore, consistencyScore, recentImprovement)) {
-            return getNextDifficultyLevel(currentDifficulty);
-        }
-        else if (shouldDecreaseDifficulty(currentDifficulty, qLearningSuggestedLevel, averageScore, consistencyScore, recentImprovement)) {
-            return getPreviousDifficultyLevel(currentDifficulty);
-        }
-
-        // Default to maintaining current level
-        return currentDifficulty;
-    }
-
-    private boolean shouldIncreaseDifficulty(String currentLevel, String qSuggestedLevel,
-                                             double avgScore, double consistency, double improvement) {
-        // Must meet all these conditions to step up
-        return qSuggestedLevel.equals(getNextDifficultyLevel(currentLevel)) &&
-                avgScore >= HIGH_SCORE_THRESHOLD &&
-                consistency >= 0.7 &&
-                improvement >= 0;
-    }
-
-    private boolean shouldDecreaseDifficulty(String currentLevel, String qSuggestedLevel,
-                                             double avgScore, double consistency, double improvement) {
-        // Never step down beginners
-        if (currentLevel.equals(BEGINNER)) return false;
-
-        // Conditions for stepping down
-        return qSuggestedLevel.equals(getPreviousDifficultyLevel(currentLevel)) &&
-                avgScore <= LOW_SCORE_THRESHOLD &&
-                consistency >= 0.6 &&
-                improvement <= 0;
-    }
-
-    // Helper method to calculate weighted average (recent scores weighted higher)
-    private double calculateWeightedAverageScore(List<ExerciseHistory> history) {
-        double sum = 0;
-        double weightSum = 0;
-
-        for (int i = 0; i < history.size(); i++) {
-            double weight = (i + 1) * 1.0 / history.size(); // Linear weighting
-            sum += history.get(i).getScore() * weight;
-            weightSum += weight;
-        }
-
-        return sum / weightSum;
-    }
-
-    // Helper method to calculate consistency (0-1 range)
-    private double calculateConsistencyScore(List<ExerciseHistory> history) {
-        int windowSize = Math.min(3, history.size());
-        if (windowSize < 2) return 1.0;
-
-        double min = Double.MAX_VALUE;
-        double max = Double.MIN_VALUE;
-
-        for (int i = history.size() - windowSize; i < history.size(); i++) {
-            double score = history.get(i).getScore();
-            min = Math.min(min, score);
-            max = Math.max(max, score);
-        }
-
-        // Normalize consistency (1 = perfect consistency)
-        return 1.0 - (max - min) / 100.0;
-    }
-
-    // Helper method to calculate recent improvement trend
-    private double calculateRecentImprovement(List<ExerciseHistory> history) {
-        if (history.size() < 2) return 0;
-
-        int windowSize = Math.min(3, history.size());
-        double sumImprovement = 0;
-
-        for (int i = history.size() - windowSize; i < history.size() - 1; i++) {
-            sumImprovement += history.get(i + 1).getScore() - history.get(i).getScore();
-        }
-
-        return sumImprovement / (windowSize - 1);
-    }
-
-    // Existing helper methods (unchanged)
-    private String getNextDifficultyLevel(String currentLevel) {
-        switch (currentLevel) {
-            case BEGINNER: return INTERMEDIATE;
-            case INTERMEDIATE: return ADVANCED;
-            default: return currentLevel;
+    private void saveQTables() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(Q_TABLE_FILE))) {
+            oos.writeObject(qTables);
+            System.out.println("Q-tables saved to " + Q_TABLE_FILE);
+        } catch (IOException e) {
+            System.err.println("Error saving Q-tables: " + e.getMessage());
         }
     }
 
-    private String getPreviousDifficultyLevel(String currentLevel) {
-        switch (currentLevel) {
-            case ADVANCED:
-                return INTERMEDIATE;
-            case INTERMEDIATE:
-                return BEGINNER;
-            default:
-                return currentLevel;
+    /**
+     * Loads the Q-tables from a file.
+     * @return Loaded Q-tables, or an empty ConcurrentHashMap if file not found or error occurs.
+     */
+    private ConcurrentHashMap<String, double[][]> loadQTables() {
+        File file = new File(Q_TABLE_FILE);
+        if (file.exists()) {
+            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
+                ConcurrentHashMap<String, double[][]> loadedQTables = (ConcurrentHashMap<String, double[][]>) ois.readObject();
+                System.out.println("Q-tables loaded from " + Q_TABLE_FILE);
+                return loadedQTables;
+            } catch (IOException | ClassNotFoundException e) {
+                System.err.println("Error loading Q-tables, starting fresh: " + e.getMessage());
+            }
         }
+        System.out.println("No existing Q-tables found or unable to load, starting new Q-tables.");
+        return new ConcurrentHashMap<>();
+    }
+
+    // --- Utility method to reset Q-table for a user (for testing) ---
+    public void resetUserQTable(String userId) {
+        qTables.remove(userId);
+        userLastChosenDifficultyIndex.remove(userId);
+        userExplorationRates.remove(userId);
+        saveQTables();
+        System.out.println("Q-table and state for user " + userId + " reset.");
+    }
+
+    // For debugging: print a user's Q-table
+    public void printUserQTable(String userId) {
+        double[][] qTable = qTables.get(userId);
+        if (qTable == null) {
+            System.out.println("No Q-table found for user: " + userId);
+            return;
+        }
+        System.out.println("\n--- Q-Table for User: " + userId + " ---");
+        System.out.print("        ");
+        for (String diff : VALID_DIFFICULTIES) {
+            System.out.printf("%-15s", diff);
+        }
+        System.out.println();
+        for (int i = 0; i < NUM_DIFFICULTIES; i++) {
+            System.out.printf("%-8s", VALID_DIFFICULTIES.get(i));
+            for (int j = 0; j < NUM_DIFFICULTIES; j++) {
+                System.out.printf("%-15.2f", qTable[i][j]);
+            }
+            System.out.println();
+        }
+        System.out.println("Last Chosen Difficulty: " + getDifficultyFromIndex(userLastChosenDifficultyIndex.getOrDefault(userId, -1)));
+        System.out.println("Exploration Rate: " + String.format("%.2f", userExplorationRates.getOrDefault(userId, 0.0)));
+        System.out.println("-------------------------------------\n");
     }
 }

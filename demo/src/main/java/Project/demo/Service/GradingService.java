@@ -1,142 +1,179 @@
 package Project.demo.Service;
 
-import Project.demo.Component.ProficiencyTracker;
-import Project.demo.Component.QLearningAgent;
 import Project.demo.Component.RubricLoader;
 import Project.demo.DTOs.CodeSubmission;
 import Project.demo.DTOs.GradingResult;
-import Project.demo.Enums.ProficiencyLevel;
+import Project.demo.Enums.ProficiencyLevel; // Assuming this Enum exists: Beginner, Intermediate, Advanced
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class GradingService {
 
-    @Autowired
-    private RubricLoader rubricLoader;
+    private static final Logger logger = LoggerFactory.getLogger(GradingService.class);
+    private static final String DEFAULT_DIFFICULTY = "Beginner";
+
+    private final RubricLoader rubricLoader;
+
+    // QLearningAgent is NOT directly autowired here anymore.
+    // The ExerciseServiceImpl will use the score from GradingResult
+    // to update the QLearningAgent.
 
     @Autowired
-    private QLearningAgent qLearningAgent;
+    public GradingService(RubricLoader rubricLoader) {
+        this.rubricLoader = rubricLoader;
+    }
 
+    /**
+     * Grades a code submission based on predefined rubrics.
+     * This service focuses solely on evaluating the code and producing a score and feedback.
+     * It no longer directly interacts with QLearningAgent or ProficiencyTracker to update user states;
+     * that responsibility now lies with ExerciseServiceImpl after grading.
+     *
+     * @param submission The CodeSubmission object containing code, questionId, userId, and difficulty.
+     * @return A GradingResult object with score, classification, and detailed feedback.
+     */
     public GradingResult grade(CodeSubmission submission) {
-        ProficiencyTracker proficiencyTracker = new ProficiencyTracker();
         String questionId = submission.getQuestionId();
         String code = submission.getCode();
-        String userId = submission.getUserId();
+        String userId = submission.getUserId(); // Keep userId for logging if needed, but not for direct QL update
 
         String difficulty = submission.getDifficultyLevel();
         if (difficulty == null || difficulty.isBlank()) {
-            difficulty = "Beginner";
-            System.out.println("Warning: difficulty level not provided. Defaulting to 'Beginner'.");
+            difficulty = DEFAULT_DIFFICULTY;
+            logger.warn("Difficulty level not provided for submission {}. Defaulting to '{}'. User: {}",
+                    questionId, DEFAULT_DIFFICULTY, userId);
         }
 
         Map<String, Double> specificRubric = rubricLoader.loadRubric(questionId);
         Map<String, Double> generalRubric = rubricLoader.loadGeneralRubric();
 
+        // Evaluate the submission based on rubrics
         GradingResult result = evaluateSubmission(code, questionId, difficulty, specificRubric, generalRubric);
 
+        // For context, we can log the final score and classification.
+        logger.info("Graded submission for user {}: Question ID '{}', Score: {:.2f}, Classification: {}",
+                userId, questionId, result.getScore(), result.getClassification());
 
-
-        proficiencyTracker.recordScore(userId, result.getScore());
-
-        if (proficiencyTracker.getQuestionCount(userId) >= proficiencyTracker.getWindowSize()) {
-            String userLevel = proficiencyTracker.determineUserLevel(userId);
-            result.setUserProficiencyLevel(ProficiencyLevel.valueOf(userLevel));
-            System.out.println("User " + userId + " classified as: " + userLevel);
-        }
+        // The ProficiencyTracker is now removed from here. Its logic, if still needed for *other* purposes,
+        // should be separate or integrated directly into the QLearningAgent's state management.
+        // QLearningAgent will be updated by ExerciseServiceImpl.recordExerciseResult.
 
         return result;
     }
 
+    /**
+     * Core method to evaluate the submitted code against various criteria.
+     *
+     * @param code The submitted code string.
+     * @param questionId The ID of the question.
+     * @param difficulty The difficulty of the question.
+     * @param specificRubric Question-specific rubric scores.
+     * @param generalRubric General rubric scores.
+     * @return A GradingResult containing overall score, classification, feedback, and detailed scores.
+     */
     private GradingResult evaluateSubmission(String code, String questionId, String difficulty,
                                              Map<String, Double> specificRubric,
                                              Map<String, Double> generalRubric) {
         GradingResult result = new GradingResult();
 
-        // Detailed scoring for each category
         Map<String, Map<String, Double>> detailedScores = new LinkedHashMap<>();
 
-        // Problem Solving
-        Map<String, Double> problemSolvingScores = evaluateProblemSolving(code, questionId, specificRubric, generalRubric);
-        detailedScores.put("Problem-Solving", problemSolvingScores);
-        double problemSolvingScore = problemSolvingScores.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        // Evaluate each main category and get raw scores (0-4)
+        Map<String, Double> problemSolvingRawScores = evaluateProblemSolving(code, questionId);
+        Map<String, Double> criticalThinkingRawScores = evaluateCriticalThinking(code);
+        Map<String, Double> programmingLogicRawScores = evaluateProgrammingLogic(code);
+        Map<String, Double> creativityRawScores = evaluateCreativity(code, difficulty);
 
-        // Critical Thinking
-        Map<String, Double> criticalThinkingScores = evaluateCriticalThinking(code, specificRubric, generalRubric);
-        detailedScores.put("Critical Thinking", criticalThinkingScores);
-        double criticalThinkingScore = criticalThinkingScores.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
-
-        // Programming Logic
-        Map<String, Double> programmingLogicScores = evaluateProgrammingLogic(code, specificRubric, generalRubric);
-        detailedScores.put("Programming Logic", programmingLogicScores);
-        double programmingLogicScore = programmingLogicScores.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
-
-        // Creativity
-        Map<String, Double> creativityScores = evaluateCreativity(code, difficulty, specificRubric, generalRubric);
-        detailedScores.put("Creativity", creativityScores);
-        double creativityScore = creativityScores.values().stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        // Map raw scores to actual rubric scores (0-4 for each sub-criteria) and calculate average for category
+        double problemSolvingScore = calculateCategoryScore(problemSolvingRawScores, specificRubric, generalRubric, "Problem-Solving", detailedScores);
+        double criticalThinkingScore = calculateCategoryScore(criticalThinkingRawScores, specificRubric, generalRubric, "Critical Thinking", detailedScores);
+        double programmingLogicScore = calculateCategoryScore(programmingLogicRawScores, specificRubric, generalRubric, "Programming Logic", detailedScores);
+        double creativityScore = calculateCategoryScore(creativityRawScores, specificRubric, generalRubric, "Creativity", detailedScores);
 
         // Calculate total score with weights
+        // Weights can be adjusted. Creativity typically has less weight for foundational problems.
+        // For Advanced difficulty, creativity could have more weight, as originally intended.
         boolean isAdvanced = "advanced".equalsIgnoreCase(difficulty);
-        double totalScore = problemSolvingScore * 0.3 +
-                criticalThinkingScore * 0.3 +
-                programmingLogicScore * 0.3 +
-                creativityScore * (isAdvanced ? 0.2 : 0.1);
-        totalScore = Math.min(100, totalScore * 2);
+        double totalScore = (problemSolvingScore * 0.25) + // Max 100 * 0.25 = 25
+                (criticalThinkingScore * 0.25) +  // Max 100 * 0.25 = 25
+                (programmingLogicScore * 0.40) +  // Max 100 * 0.40 = 40 (often most important)
+                (creativityScore * (isAdvanced ? 0.10 : 0.05)); // Max 100 * 0.10 = 10 (Advanced) or 5 (Other)
+
+        // Ensure total score is within 0-100 range.
+        totalScore = Math.max(0, Math.min(100, totalScore));
 
         result.setScore(totalScore);
         result.setClassification(classifyScore(totalScore));
         result.setFeedback(generateFeedback(detailedScores));
-        result.setDetailedScores(detailedScores); // Store detailed scores in the result
+        result.setDetailedScores(detailedScores);
 
         return result;
     }
 
-    private Map<String, Double> evaluateProblemSolving(String code, String questionId,
-                                                       Map<String, Double> specificRubric,
-                                                       Map<String, Double> generalRubric) {
-        Map<String, Double> scores = new LinkedHashMap<>();
+    /**
+     * Calculates the average score for a category and populates the detailedScores map.
+     *
+     * @param rawScores Raw assessment scores (e.0-4 for each sub-criteria).
+     * @param specificRubric Question-specific rubric.
+     * @param generalRubric General rubric.
+     * @param categoryName The name of the category (e.g., "Problem-Solving").
+     * @param detailedScores The map to populate with criterion-level scores.
+     * @return The averaged score for the category (scaled to 0-100).
+     */
+    private double calculateCategoryScore(Map<String, Double> rawScores,
+                                          Map<String, Double> specificRubric,
+                                          Map<String, Double> generalRubric,
+                                          String categoryName,
+                                          Map<String, Map<String, Double>> detailedScores) {
+        Map<String, Double> mappedScores = rawScores.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> mapToRubricScore(entry.getValue(), entry.getKey(), specificRubric, generalRubric),
+                        (oldValue, newValue) -> newValue, // Merge function for collect
+                        LinkedHashMap::new // Maintain insertion order
+                ));
+        detailedScores.put(categoryName, mappedScores); // Store criterion-level scores
 
-        // Problem Identification
-        double problemIdentificationScore = identifiesProblemCorrectly(code, questionId) ?
-                specificRubric.getOrDefault("Problem Identification",
-                        generalRubric.getOrDefault("Problem Identification_3", 2.0)) : 0;
-        scores.put("Problem Identification", problemIdentificationScore);
+        // Calculate average of the mapped scores for the category
+        double averageRawScore = mappedScores.values().stream()
+                .mapToDouble(Double::doubleValue)
+                .average()
+                .orElse(0.0);
 
-        // Solution Implementation
-        double solutionImplementationScore = isProblemSolved(code, questionId) ?
-                specificRubric.getOrDefault("Solution Implementation",
-                        generalRubric.getOrDefault("Solution Implementation_3", 2.0)) : 0;
-        scores.put("Solution Implementation", solutionImplementationScore);
+        // Scale the average score from a 0-4 range to a 0-100 range
+        // If your rubric values are consistently 0-4, then averageRawScore will be 0-4.
+        // Scale it: (averageRawScore / 4.0) * 100
+        return (averageRawScore / 4.0) * 100;
+    }
 
-        // Error Handling and Validation
-        double errorHandlingScore = hasComprehensiveErrorHandling(code) ?
-                specificRubric.getOrDefault("Error Handling and Validation",
-                        generalRubric.getOrDefault("Error Handling and Validation_3", 2.0)) : 0;
-        scores.put("Error Handling and Validation", errorHandlingScore);
 
-        // Handling Edge Cases
-        double edgeCaseScore = handlesEdgeCasesComprehensively(code, questionId) ?
-                specificRubric.getOrDefault("Handling Edge Cases",
-                        generalRubric.getOrDefault("Handling Edge Cases_3", 2.0)) : 0;
-        scores.put("Handling Edge Cases", edgeCaseScore);
+    // --- EVALUATION METHODS (Return raw scores, typically 0-4) ---
 
-        // Solution Testing
-        double testingScore = includesTestCases(code) ?
-                specificRubric.getOrDefault("Testing the Solution",
-                        generalRubric.getOrDefault("Testing the Solution_3", 2.0)) : 0;
-        scores.put("Testing the Solution", testingScore);
+    // Note: These methods are simplified based on string matching.
+    // A real system would use AST, test execution, etc.
+
+    private Map<String, Double> evaluateProblemSolving(String code, String questionId) {
+        Map<String, Double> scores = new LinkedHashMap<>(); // Use LinkedHashMap for predictable order
+
+        // Scores are raw 0-4 based on internal assessment logic.
+        scores.put("Problem Identification", identifiesProblemCorrectly(code, questionId));
+        scores.put("Solution Implementation", isProblemSolved(code, questionId));
+        scores.put("Error Handling and Validation", hasComprehensiveErrorHandling(code));
+        scores.put("Handling Edge Cases", handlesEdgeCasesComprehensively(code, questionId));
+        scores.put("Testing the Solution", includesTestCases(code));
 
         return scores;
     }
 
-    private Map<String, Double> evaluateCriticalThinking(String code,
-                                                         Map<String, Double> specificRubric,
-                                                         Map<String, Double> generalRubric) {
+    private Map<String, Double> evaluateCriticalThinking(String code) {
         Map<String, Double> scores = new LinkedHashMap<>();
 
         scores.put("Debugging", assessDebuggingQuality(code));
@@ -145,15 +182,10 @@ public class GradingService {
         scores.put("Pattern Recognition", assessPatternRecognition(code));
         scores.put("Conditional Thinking", assessConditionalThinking(code));
 
-        // Map raw assessment scores to rubric scores
-        scores.replaceAll((k, v) -> mapToRubricScore(v, k, specificRubric, generalRubric));
-
         return scores;
     }
 
-    private Map<String, Double> evaluateProgrammingLogic(String code,
-                                                         Map<String, Double> specificRubric,
-                                                         Map<String, Double> generalRubric) {
+    private Map<String, Double> evaluateProgrammingLogic(String code) {
         Map<String, Double> scores = new LinkedHashMap<>();
 
         scores.put("Use of Variables", assessVariableUsage(code));
@@ -164,15 +196,10 @@ public class GradingService {
         scores.put("Program Initialization", assessInitialization(code));
         scores.put("Program Termination", assessTermination(code));
 
-        // Map raw assessment scores to rubric scores
-        scores.replaceAll((k, v) -> mapToRubricScore(v, k, specificRubric, generalRubric));
-
         return scores;
     }
 
-    private Map<String, Double> evaluateCreativity(String code, String difficulty,
-                                                   Map<String, Double> specificRubric,
-                                                   Map<String, Double> generalRubric) {
+    private Map<String, Double> evaluateCreativity(String code, String difficulty) {
         Map<String, Double> scores = new LinkedHashMap<>();
 
         scores.put("Originality", assessOriginality(code));
@@ -181,500 +208,430 @@ public class GradingService {
         scores.put("Code Organization and Clarity", assessCodeOrganization(code));
         scores.put("Exploration of Alternatives", assessAlternativeSolutions(code));
 
-        // Map raw assessment scores to rubric scores
-        scores.replaceAll((k, v) -> mapToRubricScore(v, k, specificRubric, generalRubric));
-
         return scores;
     }
+
+    // --- Feedback Generation ---
 
     private String generateFeedback(Map<String, Map<String, Double>> detailedScores) {
         StringBuilder feedback = new StringBuilder();
 
         // Problem-Solving Section
         feedback.append("=== Problem-Solving ===\n");
-        feedback.append("(Assessing the ability to identify, analyze, and implement solutions for programming challenges)\n\n");
+        feedback.append("Assessing the ability to identify, analyze, and implement solutions for programming challenges.\n\n");
         appendCategoryFeedback(feedback, detailedScores.get("Problem-Solving"));
         feedback.append("\n");
 
         // Critical Thinking Section
         feedback.append("=== Critical Thinking ===\n");
-        feedback.append("(Evaluating logical reasoning, debugging, and code optimization.)\n\n");
+        feedback.append("Evaluating logical reasoning, debugging, and code optimization.\n\n");
         appendCategoryFeedback(feedback, detailedScores.get("Critical Thinking"));
         feedback.append("\n");
 
         // Programming Logic Section
         feedback.append("=== Understanding Programming Logic ===\n");
-        feedback.append("(Assessing mastery of programming constructs and logical structures.)\n\n");
+        feedback.append("Assessing mastery of programming constructs and logical structures.\n\n");
         appendCategoryFeedback(feedback, detailedScores.get("Programming Logic"));
         feedback.append("\n");
 
         // Creativity Section
         feedback.append("=== Creativity ===\n");
-        feedback.append("(Assessing originality, user-centered design, and innovative features.)\n\n");
+        feedback.append("Assessing originality, user-centered design, and innovative features.\n\n");
         appendCategoryFeedback(feedback, detailedScores.get("Creativity"));
 
         return feedback.toString();
     }
 
     private void appendCategoryFeedback(StringBuilder feedback, Map<String, Double> categoryScores) {
+        if (categoryScores == null) {
+            feedback.append("No data available for this category.\n");
+            return;
+        }
         for (Map.Entry<String, Double> entry : categoryScores.entrySet()) {
             String criteria = entry.getKey();
-            double score = entry.getValue();
+            double score = entry.getValue(); // This score is already mapped from rubric (0-4)
 
             feedback.append(String.format("Criteria: %s | Score: %.1f/4.0\n", criteria, score));
             feedback.append("Assessment: ").append(getAssessmentForScore(score, criteria)).append("\n\n");
         }
     }
 
+    /**
+     * Provides a textual assessment for a given score within a specific criteria.
+     * This needs to be carefully aligned with your rubric levels (e.g., 0=Lacking, 1=Emerging, 2=Proficient, 3=Exceeding, 4=Exceptional).
+     *
+     * @param score The score for the criteria (expected to be 0-4).
+     * @param criteria The name of the criteria.
+     * @return A descriptive assessment string.
+     */
     private String getAssessmentForScore(double score, String criteria) {
-        // Return appropriate assessment based on score and criteria
+        // Round score to nearest integer to match rubric levels
         int level = (int) Math.round(score);
 
-        switch (criteria) {
-            case "Problem Identification":
-                return switch (level) {
-                    case 0 -> "Does not attempt to identify or misinterprets the problem";
-                    case 1 -> "Identifies basic elements of the problem but lacks clarity";
-                    case 2 -> "Fully identifies the problem and understands its scope";
-                    case 3 -> "Breaks down complex problems into smaller sub-problems for structured resolution";
-                    default -> "Analyzes and breaks down complex problems into solvable components";
-                };
-            case "Solution Implementation":
-                return switch (level) {
-                    case 0 -> "No working solution attempted";
-                    case 1 -> "Implements a basic solution that partially meets requirements";
-                    case 2 -> "Implements a functional solution addressing all requirements";
-                    case 3 -> "Implements a robust, optimized solution with additional features beyond requirements";
-                    default -> "Creates innovative, optimized solutions beyond the problem's scope";
-                };
-            // Add similar cases for all criteria...
-            default:
-                return switch (level) {
-                    case 0 -> "Lacking basic proficiency";
-                    case 1 -> "Emerging proficiency";
-                    case 2 -> "Proficient";
-                    case 3 -> "Exceeding grade-level proficiency";
-                    default -> "Exceptional performance beyond expectations";
-                };
+        // Generic descriptions based on levels 0-4
+        String genericAssessment = switch (level) {
+            case 0 -> "Lacking basic proficiency in this area.";
+            case 1 -> "Emerging proficiency, some understanding but needs improvement.";
+            case 2 -> "Proficient, demonstrates solid understanding and application.";
+            case 3 -> "Exceeding expectations, strong grasp and effective application.";
+            case 4 -> "Exceptional performance, innovative or highly refined.";
+            default -> "Invalid score level."; // Should not happen with score capping
+        };
+
+        // You can add more specific feedback per criteria here if needed,
+        // but the generic one covers a lot and keeps the method cleaner.
+        // For example, for "Problem Identification":
+        if ("Problem Identification".equals(criteria)) {
+            return switch (level) {
+                case 0 -> "Did not correctly identify the core problem or misinterpreted it.";
+                case 1 -> "Identified basic elements of the problem but missed key aspects.";
+                case 2 -> "Fully identified the problem and understood its scope.";
+                case 3 -> "Clearly identified and broke down complex problems into manageable sub-problems.";
+                case 4 -> "Demonstrated exceptional insight into problem structure, anticipating complexities.";
+                default -> genericAssessment;
+            };
+        } else if ("Solution Implementation".equals(criteria)) {
+            return switch (level) {
+                case 0 -> "No functional solution attempted or submitted code does not run.";
+                case 1 -> "Implemented a partial solution that addresses some basic requirements.";
+                case 2 -> "Implemented a functional solution that meets all specified requirements.";
+                case 3 -> "Implemented a robust and efficient solution, potentially with some minor enhancements.";
+                case 4 -> "Developed an elegant, highly optimized, and potentially innovative solution, exceeding expectations.";
+                default -> genericAssessment;
+            };
         }
+        // ... add more specific cases for other criteria as desired ...
+
+        return genericAssessment; // Fallback to generic if no specific feedback
     }
 
-
-
-
-
+    /**
+     * Classifies the total score into a broad category.
+     * @param score The total score (0-100).
+     * @return A String classification (e.g., "Excellent", "Good", "Average", "Needs Improvement").
+     */
     private String classifyScore(double score) {
         if (score >= 90) return "Excellent";
-        if (score >= 70) return "Good";
+        if (score >= 75) return "Good"; // Slightly adjusted threshold for 'Good'
         if (score >= 50) return "Average";
         return "Needs Improvement";
     }
 
-    private String classificationToState(String classification) {
-        return switch (classification) {
-            case "Excellent" -> "Advanced";
-            case "Good" -> "Intermediate";
-            default -> "Beginner";
-        };
-    }
-
+    /**
+     * Maps a raw assessment level (e.g., 0-4 from evaluate methods) to a rubric score.
+     * It first tries to find a specific rubric score for the criteria and level,
+     * then a general one, falling back to the raw assessed level if no rubric entry exists.
+     *
+     * @param assessedLevel The raw level assessed by the internal methods (e.g., 0.0 to 4.0).
+     * @param criteria The name of the criteria (e.g., "Debugging").
+     * @param specificRubric Question-specific rubric.
+     * @param generalRubric General rubric.
+     * @return The mapped rubric score (expected 0.0 to 4.0).
+     */
     private double mapToRubricScore(double assessedLevel, String criteria,
                                     Map<String, Double> specificRubric,
                                     Map<String, Double> generalRubric) {
-        String rubricKey = criteria + "_" + (int)assessedLevel;
+        // Round the assessedLevel to the nearest integer to match rubric keys (e.g., "Debugging_3")
+        int roundedLevel = (int) Math.round(assessedLevel);
+        String rubricKey = criteria.replace(" ", "_") + "_" + roundedLevel; // Sanitize key for matching
+
         Double score = specificRubric.get(rubricKey);
-        if (score == null) score = generalRubric.get(rubricKey);
+        if (score == null) {
+            score = generalRubric.get(rubricKey);
+        }
+        // Fallback: if no rubric entry, return the assessed level itself.
+        // This means the assess methods are effectively defining the scores if no rubric override exists.
         return score != null ? score : assessedLevel;
     }
-    private double assessOriginality(String code) {
-        // Check for:
-        // 1. Presence of boilerplate code
-        // 2. Custom implementations vs standard solutions
-        // 3. Unique variable/method naming
-        // 4. Presence of creative comments or documentation
 
-        double originalityScore = 0;
+    // --- SIMPLISTIC CODE ANALYSIS METHODS (FOR DEMO PURPOSES ONLY) ---
+    // These methods should be replaced with robust static/dynamic analysis tools in a real application.
 
-        // Basic check for copied code markers
-        if (code.contains("// copied from") || code.matches(".*//\\s*taken from.*")) {
-            return 0; // Lacking Proficiency
+    // Problem-Solving
+    private double identifiesProblemCorrectly(String code, String questionId) {
+        // Placeholder: Needs actual problem parsing or test case evaluation
+        // A real system would use test cases to verify problem understanding.
+        switch(questionId) {
+            case "1": // Example: Count vowels problem
+                return (code.contains("count") && (code.contains("vowel") || code.contains("aeiou") || code.contains("char"))) ? 4.0 : 1.0;
+            case "2": // Example: Palindrome check
+                return (code.contains("reverse") || code.contains("equalsIgnoreCase") || code.contains("isPalindrome")) ? 4.0 : 1.0;
+            default:
+                // For generic problems, check if it looks like a solution attempt
+                return code.length() > 50 && (code.contains("main") || code.contains("public class")) ? 2.0 : 0.0;
         }
-
-        // Check for standard solution patterns
-        if (code.matches(".*public\\s+class\\s+Solution\\s*\\{.*")) {
-            originalityScore += 1; // Emerging
-        }
-
-        // Check for custom method names
-        if (code.matches(".*\\b(custom|my|original)\\w+\\s*\\(.*")) {
-            originalityScore += 1; // Developing
-        }
-
-        // Check for innovative approaches
-        if (code.contains("Optional") || code.contains("Function<") || code.contains("custom collector")) {
-            originalityScore += 2; // Proficient/Exceeding
-        }
-
-        return Math.min(4, originalityScore);
     }
 
-    private double assessCodeOrganization(String code) {
-        // Evaluate:
-        // 1. Proper indentation
-        // 2. Section comments
-        // 3. Method organization
-        // 4. File structure
+    private double hasComprehensiveErrorHandling(String code) {
+        // Check for common Java error handling constructs
+        int indicators = 0;
+        if (code.contains("try") && code.contains("catch")) indicators++;
+        if (code.contains("throws")) indicators++;
+        if (code.contains("if") && (code.contains("null") || code.contains("isEmpty()") || code.contains("isValid"))) indicators++; // Basic input validation checks
 
-        double organizationScore = 0;
-
-        // Basic indentation check
-        if (code.matches("(?s).*\\n\\s{4}\\w+.*")) { // At least some indentation
-            organizationScore += 1;
-        }
-
-        // Check for section comments
-        if (code.contains("// Section:") || code.contains("/* Main logic */")) {
-            organizationScore += 1;
-        }
-
-        // Check for method separation
-        long methodCount = code.split("public\\s+\\w+\\s+\\w+\\s*\\(").length - 1;
-        if (methodCount > 1) {
-            organizationScore += 1;
-        }
-
-        // Check for advanced organization
-        if (code.contains("@Override") || code.contains("implements") || code.contains("package ")) {
-            organizationScore += 1;
-        }
-
-        return Math.min(4, organizationScore);
+        if (indicators >= 3) return 4.0; // Excellent
+        if (indicators == 2) return 3.0; // Good
+        if (indicators == 1) return 2.0; // Basic
+        return 1.0; // Lacking
     }
+
+    private double handlesEdgeCasesComprehensively(String code, String questionId) {
+        // This is highly dependent on the question.
+        // For demo, very basic checks.
+        int indicators = 0;
+        switch(questionId) {
+            case "1": // Vowel count: empty string, string with no vowels, string with only caps
+                if (code.contains("toLowerCase") || code.contains("Character.toLowerCase")) indicators++;
+                if (code.contains("isEmpty") || code.contains("length() == 0")) indicators++;
+                break;
+            case "2": // Palindrome: empty string, single char, string with spaces/punctuation
+                if (code.contains("trim()") || code.contains("replaceAll")) indicators++;
+                if (code.contains("length() <= 1") || code.contains("equals(\"\")")) indicators++;
+                break;
+            default: // Generic checks for edge cases
+                if (code.contains("if (") && code.contains("== 0")) indicators++; // Check for zero
+                if (code.contains("if (") && code.contains("null")) indicators++;   // Check for null
+                if (code.contains("if (") && code.contains(".length() <")) indicators++; // Check for empty/min length
+                break;
+        }
+        if (indicators >= 2) return 4.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
+    }
+
+    private double includesTestCases(String code) {
+        int indicators = 0;
+        if (code.contains("main(String[] args)") && (code.contains("System.out.println") || code.contains("assert"))) indicators++;
+        if (code.contains("@Test") || code.contains("JUnit") || code.contains("org.junit")) indicators+=2; // For proper testing frameworks
+        if (Pattern.compile("//\\s*Test\\s+case", Pattern.CASE_INSENSITIVE).matcher(code).find()) indicators++; // Comments indicating test cases
+
+        if (indicators >= 3) return 4.0;
+        if (indicators == 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
+    }
+
+    private double isProblemSolved(String code, String questionId) {
+        // This method implies the solution is "correct". In a real system,
+        // this would involve running hidden test cases and asserting outputs.
+        // For this demo, it's a very weak indicator.
+        // You would typically call an external grading tool here.
+        switch(questionId) {
+            case "1": // Vowel count
+                // Requires a more robust check like actual execution
+                return (code.contains("for") && code.contains("char") && code.contains("count")) ? 3.0 : 1.0;
+            case "2": // Palindrome
+                // Requires a more robust check like actual execution
+                return (code.contains("for") && code.contains("charAt") && code.contains("==")) ? 3.0 : 1.0;
+            default:
+                // Assume it's solved if it compiles and has some structure
+                return (code.contains("public class") && code.contains("main")) ? 2.0 : 0.0;
+        }
+    }
+
+
+    // Critical Thinking
     private double assessDebuggingQuality(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("System.out.println") || code.contains("logger.")) indicators++; // Basic logging/printing
+        if (code.contains("// Debug: ") || code.contains("/* Debugging section */")) indicators++; // Explicit debugging comments
+        if (code.contains("try") && code.contains("catch") && code.contains("Exception")) indicators++; // General exception handling as a debugging measure
 
-        // Basic syntax error handling
-        if (code.contains("try") || code.contains("catch")) score += 1;
-
-        // Logical error handling
-        if (code.contains("log") || code.contains("print") || code.contains("debug")) score += 1;
-
-        // Systematic debugging
-        if (code.matches(".*//\\s*TODO:\\s*fix.*") ||
-                code.matches(".*//\\s*FIXME.*")) {
-            score += 0.5; // Negative points for unresolved issues
-        }
-
-        // Advanced debugging
-        if (code.contains("logger") || code.contains("Debugger") ||
-                code.contains("breakpoint")) {
-            score += 2;
-        }
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0; // Good
+        if (indicators == 1) return 2.0; // Basic
+        return 1.0; // Lacking
     }
 
     private double assessOptimizationLevel(String code) {
-        double score = 0;
-
-        // Basic optimization
-        if (!code.contains("for (int i = 0")) score += 1;
-
-        // Use of efficient constructs
-        if (code.contains("stream()") || code.contains("mapToObj") ||
-                code.contains("collect(Collectors")) {
-            score += 1;
+        int indicators = 0;
+        if (code.contains(".stream()") && code.contains(".collect(")) indicators++; // Use of Streams
+        if (code.contains("StringBuilder") || code.contains("StringBuffer")) indicators++; // Efficient string manipulation
+        if (Pattern.compile("for\\s*\\(.*\\)\\s*\\{.*for\\s*\\(.*", Pattern.DOTALL).matcher(code).find()) {
+            // Penalize overly nested loops unless justified (hard to tell with regex)
+            // This is a very crude proxy. A real check would analyze algorithm complexity.
+            // For now, let's look for common optimizations
         }
+        if (code.contains("HashMap") || code.contains("HashSet")) indicators++; // Use of efficient data structures
 
-        // Algorithmic optimization
-        if (code.contains("O(1)") || code.contains("O(n)")) score += 1;
-        if (code.contains("O(log n)") || code.contains("O(n log n)")) score += 2;
-
-        // Memory optimization
-        if (code.contains("new ArrayList") && code.contains("initialCapacity")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessLogicEvaluation(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("// Logic Explanation:") || code.contains("// Why this approach:")) indicators++; // Comments explaining logic
+        if (code.contains("switch") && code.contains("case")) indicators++; // Alternative to if-else chains
+        if (code.contains("enum")) indicators++; // Structured logic with enums
 
-        // Basic logic evaluation
-        if (code.contains("// This works because") ||
-                code.contains("// Logic explanation")) {
-            score += 1;
-        }
-
-        // Intermediate evaluation
-        if (code.matches(".*//\\s*Alternative approach.*") ||
-                code.matches(".*//\\s*Considered.*but.*")) {
-            score += 2;
-        }
-
-        // Advanced evaluation
-        if (code.contains("// Benchmark results") ||
-                code.contains("// Compared with")) {
-            score += 3;
-        }
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessPatternRecognition(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("for (") && code.contains(":") && code.contains("List<")) indicators++; // Enhanced for-loop with List
+        if (code.contains("Map<") && code.contains("put") && code.contains("get")) indicators++; // Common Map pattern
+        if (code.contains("interface") || code.contains("abstract class")) indicators++; // Design patterns indicators
 
-        // Basic pattern recognition
-        if (code.contains("for") && code.contains("if")) score += 1;
-
-        // Intermediate patterns
-        if (code.contains("Map<") || code.contains("List<")) score += 1;
-        if (code.contains("Function<") || code.contains("Predicate<")) score += 2;
-
-        // Advanced patterns
-        if (code.contains("Factory") || code.contains("Singleton")) score += 1;
-        if (code.contains("Strategy") || code.contains("Observer")) score += 2;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessConditionalThinking(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("if") || code.contains("else")) indicators++;
+        if (code.contains("&&") || code.contains("||")) indicators++; // Complex conditions
+        if (code.contains("? :")) indicators++; // Ternary operator
 
-        // Basic conditionals
-        if (code.contains("if") || code.contains("switch")) score += 1;
-
-        // Nested conditionals
-        long nestedIfCount = code.split("if\\s*\\(.*\\)\\s*\\{.*if\\s*\\(").length - 1;
-        score += Math.min(2, nestedIfCount);
-
-        // Boolean logic
-        if (code.contains("&&") || code.contains("||")) score += 1;
-        if (code.contains("!") && code.contains("^")) score += 1;
-
-        // Ternary operator
-        if (code.contains("?")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
+
+
+    // Programming Logic
     private double assessVariableUsage(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("int ") || code.contains("String ") || code.contains("boolean ")) indicators++; // Basic types
+        if (code.contains("final ")) indicators++; // Immutability
+        if (code.contains("static ")) indicators++; // Class vs instance
 
-        // Basic variable usage
-        if (code.matches(".*\\w+\\s+\\w+\\s*=.*")) score += 1;
-
-        // Meaningful naming
-        if (code.matches(".*\\b(count|total|result)\\b.*")) score += 1;
-        if (code.matches(".*\\b([A-Z][a-z]+){2,}\\b.*")) score += 1; // CamelCase
-
-        // Advanced usage
-        if (code.contains("final")) score += 1;
-        if (code.contains("var ")) score += 1; // Java 10+ type inference
-
-        // Collections
-        if (code.contains("List<") || code.contains("Map<")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessLoopUsage(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("for (") || code.contains("while (")) indicators++;
+        if (code.contains("break") || code.contains("continue")) indicators++; // Control flow
+        if (code.contains(".forEach(")) indicators++; // Functional loops
 
-        // Basic loops
-        if (code.contains("for") || code.contains("while")) score += 1;
-
-        // Enhanced for loop
-        if (code.contains("for (") && code.contains(":")) score += 1;
-
-        // Nested loops
-        long nestedLoopCount = code.split("for\\s*\\(.*\\)\\s*\\{.*for\\s*\\(").length - 1;
-        score += Math.min(2, nestedLoopCount);
-
-        // Streams (functional loops)
-        if (code.contains(".stream()")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessConditionalUsage(String code) {
-        // Similar to assessConditionalThinking but focused on proper usage
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("if (") || code.contains("switch (")) indicators++;
+        if (code.contains("else if")) indicators++; // Chained conditions
+        if (code.contains("default:")) indicators++; // Switch default
 
-        // Basic conditionals
-        if (code.contains("if") || code.contains("switch")) score += 1;
-
-        // Proper structure
-        if (code.matches(".*if\\s*\\(.*\\)\\s*\\{.*\\}\\s*else\\s*\\{.*")) score += 1;
-
-        // Complete conditions
-        if (code.contains("else if")) score += 1;
-        if (code.contains("default:")) score += 1;
-
-        // Boolean expressions
-        if (code.matches(".*\\b(true|false)\\b.*")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessFunctionUsage(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("public static void main")) indicators++; // Main method
+        if (Pattern.compile("\\b(public|private|protected)\\s+\\w+\\s+\\w+\\s*\\(", Pattern.DOTALL).matcher(code).find()) indicators++; // Custom methods
+        if (code.contains("return ")) indicators++; // Return values
+        if (code.contains("void ")) indicators++; // Procedures
 
-        // Basic function
-        if (code.matches(".*\\bvoid\\b.*\\b\\w+\\s*\\(.*\\).*")) score += 1;
-
-        // Parameters
-        if (code.matches(".*\\b\\w+\\s*\\(\\s*\\w+\\s+\\w+\\s*\\).*")) score += 1;
-
-        // Return values
-        if (code.matches(".*\\b(int|String|boolean)\\b.*\\b\\w+\\s*\\(.*\\).*")) score += 1;
-
-        // Multiple functions
-        long functionCount = code.split("\\b(public|private|protected)\\s+\\w+\\s+\\w+\\s*\\(").length - 1;
-        score += Math.min(2, functionCount / 2.0);
-
-        // Recursion
-        if (code.matches(".*\\breturn\\b.*\\b\\w+\\s*\\(.*\\).*")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 3) return 4.0;
+        if (indicators == 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessOperatorUsage(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("+") || code.contains("-") || code.contains("*") || code.contains("/")) indicators++; // Arithmetic
+        if (code.contains("&&") || code.contains("||")) indicators++; // Logical
+        if (code.contains("==") || code.contains("!=")) indicators++; // Comparison
+        if (code.contains("++") || code.contains("--")) indicators++; // Unary/Increment
 
-        // Arithmetic operators
-        if (code.contains("+") || code.contains("-") || code.contains("*") || code.contains("/")) score += 1;
-
-        // Relational operators
-        if (code.contains(">") || code.contains("<") || code.contains("==")) score += 1;
-
-        // Boolean operators
-        if (code.contains("&&") || code.contains("||") || code.contains("!")) score += 1;
-
-        // Bitwise operators
-        if (code.contains("&") || code.contains("|") || code.contains("^") || code.contains("~")) score += 1;
-
-        // Compound operators
-        if (code.contains("+=") || code.contains("-=") || code.contains("*=")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 3) return 4.0;
+        if (indicators == 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessInitialization(String code) {
-        // Check for proper initialization patterns
-        if (code.matches(".*\\b\\w+\\s+\\w+\\s*=\\s*new\\b.*")) return 3; // Object initialization
-        if (code.matches(".*\\b\\w+\\s+\\w+\\s*=\\s*[^;]+;.*")) return 2; // Any initialization
-        if (code.matches(".*\\b\\w+\\s+\\w+\\s*;.*")) return 1; // Declaration only
-        return 0; // No initialization
+        int indicators = 0;
+        if (code.contains("int ") && code.contains(" = ")) indicators++; // Primitive initialization
+        if (code.contains("new ") && (code.contains("(") || code.contains("["))) indicators++; // Object/array instantiation
+        if (code.contains("= null")) indicators++; // Explicit null assignment
+
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessTermination(String code) {
-        // Check for proper program termination
-        if (code.contains("System.exit")) return 4; // Explicit termination
-        if (code.contains("return") && code.contains("main")) return 3; // Main method return
-        if (code.matches("(?s).*}\\s*$")) return 2; // Natural end
-        return 1; // No clear termination
+        int indicators = 0;
+        if (code.contains("return;")) indicators++; // Method return
+        if (code.contains("System.exit(0)")) indicators++; // Explicit program exit
+        if (code.contains("throw new")) indicators++; // Exception for termination
+
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
+
+
+    // Creativity
+    private double assessOriginality(String code) {
+        int indicators = 0;
+        // Looking for less common patterns, custom utility methods
+        if (code.contains("private static") && Pattern.compile("public\\s+class\\s+\\w+\\s*\\{[^}]*private\\s+static\\s+\\w+\\s+\\w+\\s*\\(", Pattern.DOTALL).matcher(code).find()) indicators++; // Custom helper methods
+        if (code.contains("Comparator") || code.contains("Comparable")) indicators++; // Custom sorting
+        if (code.contains("// Unique approach") || code.contains("// My custom solution")) indicators++; // Self-declared originality
+
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
+    }
+
     private double assessInnovation(String code, String difficulty) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("design pattern")) indicators++; // Mention of design patterns
+        if (code.contains("@Override") || code.contains("implements")) indicators++; // Polymorphism, interfaces
+        if ("Advanced".equalsIgnoreCase(difficulty) && (code.contains("lambda") || code.contains("CompletableFuture"))) indicators++; // Advanced Java features
 
-        // Basic innovation
-        if (code.contains("// New approach") || code.contains("// Different from")) score += 1;
-
-        // Algorithm innovation
-        if (code.contains("// Original algorithm") ||
-                code.matches(".*\\b(custom|my)\\w+\\b.*")) {
-            score += 2;
-        }
-
-        // Advanced innovation for higher difficulty
-        if ("advanced".equalsIgnoreCase(difficulty)) {
-            if (code.contains("interface") || code.contains("abstract class")) score += 1;
-            if (code.contains("enum") || code.contains("annotation")) score += 1;
-        }
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessProblemExpansion(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (code.contains("// Extension:") || code.contains("// Future features:")) indicators++; // Comments about extensions
+        if (code.contains("Scanner") && code.contains("System.in")) indicators++; // Basic interactive input (beyond strict problem scope)
+        if (code.contains("File") || code.contains("IO")) indicators++; // File I/O for more complex interaction
 
-        // Basic expansion
-        if (code.contains("// Extra feature") || code.contains("// Bonus")) score += 1;
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
+    }
 
-        // Intermediate expansion
-        if (code.matches(".*//\\s*Handles\\s+additional\\s+case.*")) score += 2;
+    private double assessCodeOrganization(String code) {
+        int indicators = 0;
+        if (code.contains("package ")) indicators++; // Package declaration
+        if (code.contains("import ")) indicators++; // Import statements
+        if (code.matches("(?s).*\\n\\s{4}\\w+.*")) indicators++; // Basic indentation (4 spaces)
+        if (code.contains("/*") && code.contains("*/")) indicators++; // Multi-line comments for sections
+        if (code.contains("//")) indicators++; // Single-line comments
 
-        // Advanced expansion
-        if (code.contains("extends") || code.contains("implements")) score += 1;
-        if (code.contains("// Future work") || code.contains("// Potential extension")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 3) return 4.0;
+        if (indicators == 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
 
     private double assessAlternativeSolutions(String code) {
-        double score = 0;
+        int indicators = 0;
+        if (Pattern.compile("//\\s*Alternative\\s+solution", Pattern.CASE_INSENSITIVE).matcher(code).find()) indicators++; // Commented alternatives
+        if (code.contains("if-else if") && code.contains("switch")) indicators++; // Using different conditional structures for same logic
+        if (code.contains("List") && code.contains("Set")) indicators++; // Demonstrating knowledge of different data structures for a similar problem
 
-        // Commented alternatives
-        long alternativeCount = code.split("// Alternative").length - 1;
-        score += Math.min(2, alternativeCount);
-
-        // Implemented alternatives
-        if (code.contains("switch") || code.contains("else if")) score += 1;
-        if (code.matches(".*//\\s*Compared with.*")) score += 1;
-
-        return Math.min(4, score);
+        if (indicators >= 2) return 3.0;
+        if (indicators == 1) return 2.0;
+        return 1.0;
     }
-    private boolean identifiesProblemCorrectly(String code, String questionId) {
-        // Check if code addresses the core problem requirements
-        switch(questionId) {
-            case "1": // Example: Count vowels problem
-                return code.contains("count") &&
-                        (code.contains("vowel") || code.contains("aeiou"));
-            case "2": // Example: Palindrome check
-                return code.contains("reverse") || code.contains("equalsIgnoreCase");
-            default:
-                return code.length() > 50; // Basic length check for generic problems
-        }
-    }
-
-    private boolean hasComprehensiveErrorHandling(String code) {
-        // Check for multiple error handling techniques
-        int errorHandlingCount = 0;
-
-        if (code.contains("try") && code.contains("catch")) errorHandlingCount++;
-        if (code.contains("if") && code.contains("null")) errorHandlingCount++;
-        if (code.contains("validate") || code.contains("check")) errorHandlingCount++;
-        if (code.contains("throws")) errorHandlingCount++;
-
-        return errorHandlingCount >= 2;
-    }
-
-    private boolean handlesEdgeCasesComprehensively(String code, String questionId) {
-        // Question-specific edge case checks
-        switch(questionId) {
-            case "1": // Vowel count
-                return code.contains("toLowerCase") ||
-                        code.contains("Character.toLowerCase") ||
-                        code.contains("Arrays.asList('a','e','i','o','u')");
-            case "2": // Palindrome
-                return code.contains("trim()") &&
-                        (code.contains("length() < 2") || code.contains("== 1"));
-            default:
-                return code.contains("if") && code.contains("else");
-        }
-    }
-
-    private boolean includesTestCases(String code) {
-        // Check for test cases or assertions
-        return code.contains("assert") ||
-                code.contains("test") ||
-                code.contains("main(String[] args)") ||
-                code.matches(".*//\\s*Test case.*");
-    }
-    private boolean isProblemSolved(String code, String questionId) {
-        if ("1".equals(questionId)) {
-            return code.contains("chars()") && code.contains("filter") && code.contains("count");
-        }
-        return true;
-    }
-
 }

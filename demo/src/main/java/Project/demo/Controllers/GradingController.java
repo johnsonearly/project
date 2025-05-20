@@ -35,7 +35,6 @@ public class GradingController {
                 "200",
                 gradingService.grade(codeSubmission)
         );
-        System.out.println(codeSubmission);
 
         return ResponseEntity.ok(response);
     }

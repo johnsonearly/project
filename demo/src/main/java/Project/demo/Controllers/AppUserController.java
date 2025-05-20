@@ -49,8 +49,10 @@ public class AppUserController {
     }
 
     @PutMapping("update/{userId}")
-    public void updateUser(@PathVariable  String userId){
-      userServiceImplementation.updateUser(userId);
+    public String updateUser(@PathVariable  String userId){
+
+        return userServiceImplementation.updateUser(userId);
+
     }
 
     @PostMapping("login")
@@ -69,6 +71,10 @@ public class AppUserController {
         return ResponseEntity.ok(message);
     }
 
+    @GetMapping("getUser/{userId}")
+    public AppUser getUser(@PathVariable String userId){
+        return userServiceImplementation.getUser(userId);
+    }
 
 
 

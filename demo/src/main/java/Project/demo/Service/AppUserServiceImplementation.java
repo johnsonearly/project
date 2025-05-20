@@ -37,11 +37,17 @@ public class AppUserServiceImplementation {
         Optional<AppUser> appUser = appUserInterface.findByUserId(loginDTO.getUserId());
         return appUser.map(user -> ResponseEntity.ok(user.getUserId())).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + loginDTO.getUserId()));
     }
-    public void updateUser(String userId){
-        String recommendedLevel = learningAgent.determineRecommendedProficiencyLevel(userId);
-        Optional<AppUser> user = appUserInterface.findByUserId(userId);
-        user.ifPresent(appUser -> appUser.setProficiency(recommendedLevel));
-        System.out.println(recommendedLevel);
+    public String updateUser(String userId) {
+        String recommendedLevel = learningAgent.determineNextDifficulty(userId);
+        Optional<AppUser> userOptional = appUserInterface.findByUserId(userId);
+
+        if (userOptional.isPresent()) {
+            AppUser user = userOptional.get();
+            user.setProficiency(recommendedLevel);
+            appUserInterface.save(user); // This is the crucial line that was missing
+        }
+
+        return recommendedLevel;
     }
     public AppUser getUser(String userId){
         Optional<AppUser> appUser = appUserInterface.findByUserId(userId);
