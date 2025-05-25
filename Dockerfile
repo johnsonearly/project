@@ -4,7 +4,7 @@ FROM eclipse-temurin:21-jdk as builder
 # Set working directory inside the container
 WORKDIR /app
 
-# Copy your project files from the subdirectory `project`
+# Copy your project files from the subdirectory `demo`
 COPY demo/pom.xml .
 COPY demo/mvnw .
 COPY demo/.mvn .mvn
@@ -21,8 +21,8 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /demo
 
-# Copy the built JAR from the previous stage
-COPY --from=builder /demo/target/*.jar demo.jar
+
+COPY --from=builder /app/target/*.jar demo.jar
 
 # Expose the port Spring Boot runs on
 EXPOSE 8080
