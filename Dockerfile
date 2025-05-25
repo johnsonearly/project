@@ -5,10 +5,10 @@ FROM eclipse-temurin:21-jdk as builder
 WORKDIR /app
 
 # Copy your project files from the subdirectory `project`
-COPY project/pom.xml .
-COPY project/mvnw .
-COPY project/.mvn .mvn
-COPY project/src ./src
+COPY demo/pom.xml .
+COPY demo/mvnw .
+COPY demo/.mvn .mvn
+COPY demo/src ./src
 
 # Make Maven wrapper executable
 RUN chmod +x mvnw
@@ -19,13 +19,13 @@ RUN ./mvnw clean package -DskipTests
 # === Stage 2: Run the built JAR ===
 FROM eclipse-temurin:21-jre
 
-WORKDIR /app
+WORKDIR /demo
 
 # Copy the built JAR from the previous stage
-COPY --from=builder /app/target/*.jar app.jar
+COPY --from=builder /demo/target/*.jar demo.jar
 
 # Expose the port Spring Boot runs on
 EXPOSE 8080
 
 # Start the Spring Boot application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "demo.jar"]
