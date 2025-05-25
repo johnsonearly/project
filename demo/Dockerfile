@@ -20,4 +20,4 @@ COPY --from=build /demo/target/*.jar demo.jar
 EXPOSE 8080
 
 # Run the Spring Boot application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "demo.jar"]
