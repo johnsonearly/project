@@ -22,6 +22,7 @@ public class AppUserServiceImplementation {
     private QLearningAgent learningAgent;
 
     public AppUser createUser(AppUser appUser){
+        appUser.setProficiency("Beginner");
         appUserInterface.save(appUser);
         return  appUser;
     }
@@ -38,7 +39,7 @@ public class AppUserServiceImplementation {
         return appUser.map(user -> ResponseEntity.ok(user.getUserId())).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + loginDTO.getUserId()));
     }
     public String updateUser(String userId) {
-        String recommendedLevel = learningAgent.determineNextDifficulty(userId);
+        String recommendedLevel = learningAgent.evaluateUserProficiency(userId);
         Optional<AppUser> userOptional = appUserInterface.findByUserId(userId);
 
         if (userOptional.isPresent()) {

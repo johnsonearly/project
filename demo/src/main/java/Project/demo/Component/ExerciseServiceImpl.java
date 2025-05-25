@@ -239,9 +239,6 @@ public class ExerciseServiceImpl {
         }
 
         // Save the exercise history immediately
-        // Removed `ExerciseHistory` from here for now, as it's not strictly part of the Q-learning logic,
-        // but keep your `ExerciseHistoryRepository` if you use it elsewhere.
-        // If you need to save history, add it back here.
         ExerciseHistory history = new ExerciseHistory();
         history.setUserId(userId);
         history.setExerciseId(Integer.parseInt(exerciseId));
@@ -291,6 +288,35 @@ public class ExerciseServiceImpl {
                 sessionState.resetCycle(DEFAULT_DIFFICULTY);
             }
         }
+    }
+
+    /**
+     * **NEW FUNCTION:** Handles explicit user feedback for a given exercise.
+     * Delegates the Q-value update based on feedback to the QLearningAgent.
+     *
+     * @param userId The ID of the user providing feedback.
+     * @param exerciseId The ID of the exercise the user is providing feedback on.
+     * @param feedbackType "Like" or "Dislike".
+     */
+    public void recordUserFeedback(String userId, String exerciseId, String feedbackType) {
+        if (userId == null || exerciseId == null || feedbackType == null) {
+            logger.warn("Cannot record user feedback: userId, exerciseId, or feedbackType is null.");
+            return;
+        }
+
+        ExerciseDTO exercise = exerciseCache.get(exerciseId);
+        if (exercise == null) {
+            logger.error("Exercise with ID {} not found in cache when recording feedback for user {}. Cannot process feedback.", exerciseId, userId);
+            throw new IllegalArgumentException("Exercise not found for feedback.");
+        }
+        String exerciseDifficulty = exercise.getDifficulty(); // Get the difficulty of the exercise
+
+        logger.info("User {}: Received feedback '{}' for exercise {} (Difficulty: {}).",
+                userId, feedbackType, exerciseId, exerciseDifficulty);
+
+        // Delegate the feedback processing to the QLearningAgent
+        qLearningAgent.updateQValuesBasedOnFeedback(userId, exerciseDifficulty, feedbackType);
+        logger.info("User {}: Feedback processed by Q-Learning agent.", userId);
     }
 
 
@@ -396,17 +422,34 @@ public class ExerciseServiceImpl {
         }
 
         try {
-            // IMPORTANT: If QLearningAgent doesn't have determineRecommendedProficiencyLevel,
-            // replace it with determineNextDifficulty or adjust QLearningAgent.
-            // I'm assuming for now that determineRecommendedProficiencyLevel exists in QLearningAgent
-            // and simply returns the current best guess without advancing state.
-            String recommendedDifficulty = qLearningAgent.determineNextDifficulty(userId); // Assuming this works for non-cycle scenarios
-            String validatedDifficulty = validateDifficulty(recommendedDifficulty);
+            // Updated: Using qLearningAgent.evaluateUserProficiency() instead of determineNextDifficulty
+            // to get a user's general proficiency for displaying a list, not to advance the cycle.
+            String recommendedProficiency = qLearningAgent.evaluateUserProficiency(userId);
+            String validatedDifficulty = validateDifficulty(recommendedProficiency);
 
             List<String> exerciseIdsForDifficulty = difficultyExerciseCache.get(validatedDifficulty);
             if (exerciseIdsForDifficulty == null || exerciseIdsForDifficulty.isEmpty()) {
-                logger.warn("No exercises found for recommended difficulty '{}' for user {}. Returning empty list.", validatedDifficulty, userId);
-                return Collections.emptyList();
+                logger.warn("No exercises found for recommended proficiency '{}' for user {}. Attempting fallback difficulties.", validatedDifficulty, userId);
+
+                // Fallback logic if the primary recommended difficulty has no exercises
+                List<String> orderedDifficulties = new ArrayList<>(VALID_DIFFICULTIES);
+                int currentIndex = orderedDifficulties.indexOf(validatedDifficulty);
+                if (currentIndex == -1) currentIndex = orderedDifficulties.indexOf(DEFAULT_DIFFICULTY); // Fallback if initial validated difficulty is also invalid
+
+                // Try current, then easier, then harder (or cycle through)
+                for (int i = 0; i < VALID_DIFFICULTIES.size(); i++) {
+                    String difficultyToTry = orderedDifficulties.get(Math.abs(currentIndex + i) % orderedDifficulties.size());
+                    exerciseIdsForDifficulty = difficultyExerciseCache.get(difficultyToTry);
+                    if (exerciseIdsForDifficulty != null && !exerciseIdsForDifficulty.isEmpty()) {
+                        logger.info("Found exercises from fallback difficulty '{}' for user {}.", difficultyToTry, userId);
+                        break;
+                    }
+                }
+
+                if (exerciseIdsForDifficulty == null || exerciseIdsForDifficulty.isEmpty()) {
+                    logger.warn("Still no exercises found for any difficulty for user {}. Returning empty list.", userId);
+                    return Collections.emptyList();
+                }
             }
 
             List<String> shuffledIds = new ArrayList<>(exerciseIdsForDifficulty);
@@ -426,10 +469,9 @@ public class ExerciseServiceImpl {
 
     /**
      * Updates a user's proficiency string directly based on new score and difficulty.
-     * This is a separate endpoint, likely for a different user update flow.
-     * The QLearningAgent itself determines the proficiency from the Q-table.
-     * This method might be for administrative updates or initial settings,
-     * or if the User entity's proficiency is a separate field to be synchronized.
+     * This method is separate from the Q-learning cycle updates and might be used
+     * for administrative or direct user profile modifications.
+     * The QLearningAgent itself determines the proficiency from the Q-table for its internal logic.
      *
      * @param userId The ID of the user.
      * @param score The score from the latest exercise.

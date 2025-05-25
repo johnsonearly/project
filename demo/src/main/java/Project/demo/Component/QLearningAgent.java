@@ -67,7 +67,7 @@ public class QLearningAgent {
      * @param index The index (0, 1, or 2).
      * @return The corresponding difficulty string or DEFAULT_DIFFICULTY if index is out of bounds.
      */
-    private String getDifficultyFromIndex(int index) {
+    public String getDifficultyFromIndex(int index) { // Made public for external use like in ExerciseServiceImpl
         if (index >= 0 && index < NUM_DIFFICULTIES) {
             return VALID_DIFFICULTIES.get(index);
         }
@@ -176,7 +176,7 @@ public class QLearningAgent {
         userLastChosenDifficultyIndex.put(userId, nextStateIndex);
 
 
-        System.out.println("--- Q-Value Update for User " + userId + " ---");
+        System.out.println("--- Q-Value Update for User " + userId + " (Performance) ---");
         System.out.println("Current State (Served Difficulty): " + getDifficultyFromIndex(currentStateIndex));
         System.out.println("Action Taken (Served Difficulty): " + getDifficultyFromIndex(actionTakenIndex));
         System.out.println("Average Score: " + averageScore);
@@ -189,6 +189,61 @@ public class QLearningAgent {
 
         saveQTables(); // Persist the updated Q-table
     }
+
+    /**
+     * **NEW FUNCTION:** Updates the Q-value based on explicit user feedback.
+     * This function allows direct reward/punishment of specific state-action pairs
+     * based on whether the user liked or disliked the exercise served.
+     *
+     * @param userId The ID of the user providing feedback.
+     * @param exerciseDifficulty The difficulty of the exercise the feedback is about.
+     * @param feedbackType "Like" or "Dislike".
+     */
+    public synchronized void updateQValuesBasedOnFeedback(String userId, String exerciseDifficulty, String feedbackType) {
+        double[][] qTable = qTables.computeIfAbsent(userId, k -> initializeQTable());
+
+        // The state is the user's proficiency level when they received the exercise.
+        // For simplicity, we use the provided exercise difficulty as the state for feedback.
+        int currentStateIndex = getDifficultyIndex(exerciseDifficulty);
+
+        // The action is implicitly "serving an exercise of this difficulty".
+        int actionTakenIndex = getDifficultyIndex(exerciseDifficulty);
+
+        double feedbackReward = 0.0;
+        if ("Like".equalsIgnoreCase(feedbackType)) {
+            feedbackReward = 5.0; // Positive reinforcement for good exercises
+            System.out.println("User " + userId + " liked difficulty " + exerciseDifficulty + ". Applying positive feedback reward.");
+        } else if ("Dislike".equalsIgnoreCase(feedbackType)) {
+            feedbackReward = -5.0; // Negative reinforcement for bad exercises
+            System.out.println("User " + userId + " disliked difficulty " + exerciseDifficulty + ". Applying negative feedback reward.");
+        } else {
+            System.err.println("Invalid feedback type: " + feedbackType + " for user " + userId);
+            return; // Do nothing for invalid feedback
+        }
+
+        // Apply Q-learning formula: Q(s, a) = Q(s, a) + alpha * [reward + gamma * max(Q(s', a')) - Q(s, a)]
+        // For feedback, we simplify the formula as there's no direct "next state"
+        // based on this feedback alone, but rather a direct adjustment to the value
+        // of *this specific state-action pair*.
+        // We'll treat the 'next state' as the current state (currentStateIndex), essentially reinforcing
+        // the value of having provided that difficulty.
+        double oldQValue = qTable[currentStateIndex][actionTakenIndex];
+        double maxFutureQ = getMaxQValue(qTable, currentStateIndex); // Max Q-value from the *current* state.
+
+        double newQValue = oldQValue + LEARNING_RATE * (feedbackReward + DISCOUNT_FACTOR * maxFutureQ - oldQValue);
+        qTable[currentStateIndex][actionTakenIndex] = newQValue;
+
+        System.out.println("--- Q-Value Update for User " + userId + " (Feedback) ---");
+        System.out.println("State (Exercise Difficulty): " + getDifficultyFromIndex(currentStateIndex));
+        System.out.println("Action Taken (Served Difficulty): " + getDifficultyFromIndex(actionTakenIndex));
+        System.out.println("Feedback Reward: " + feedbackReward);
+        System.out.println("Old Q(" + getDifficultyFromIndex(currentStateIndex) + ", " + getDifficultyFromIndex(actionTakenIndex) + "): " + String.format("%.2f", oldQValue));
+        System.out.println("New Q(" + getDifficultyFromIndex(currentStateIndex) + ", " + getDifficultyFromIndex(actionTakenIndex) + "): " + String.format("%.2f", newQValue));
+        System.out.println("Q-Table for " + userId + " (relevant row after feedback for " + getDifficultyFromIndex(currentStateIndex) + "): " + Arrays.toString(qTable[currentStateIndex]));
+
+        saveQTables(); // Persist the updated Q-table
+    }
+
 
     /**
      * Determines the 'next state' (user's new effective proficiency level) based on the current performance.
@@ -313,5 +368,27 @@ public class QLearningAgent {
         System.out.println("Last Chosen Difficulty: " + getDifficultyFromIndex(userLastChosenDifficultyIndex.getOrDefault(userId, -1)));
         System.out.println("Exploration Rate: " + String.format("%.2f", userExplorationRates.getOrDefault(userId, 0.0)));
         System.out.println("-------------------------------------\n");
+    }
+
+    /**
+     * Evaluates and returns a categorical proficiency level for a user.
+     * This function uses the Q-table and the user's `userLastChosenDifficultyIndex`
+     * (which represents the current 'state' or 'proficiency level' the Q-agent believes the user is in)
+     * as the primary indicator.
+     *
+     * @param userId The ID of the user.
+     * @return A string representing the user's evaluated proficiency (e.g., "Beginner", "Intermediate", "Advanced", "No Data").
+     */
+    public String evaluateUserProficiency(String userId) {
+        if (!qTables.containsKey(userId) || !userLastChosenDifficultyIndex.containsKey(userId)) {
+            System.out.println("User " + userId + ": No Q-learning data found, defaulting to " + DEFAULT_DIFFICULTY + " proficiency.");
+            return DEFAULT_DIFFICULTY;
+        }
+
+        int proficiencyIndex = userLastChosenDifficultyIndex.get(userId);
+
+        String proficiency = getDifficultyFromIndex(proficiencyIndex);
+        System.out.println("User " + userId + ": Evaluated proficiency based on Q-Learning state: " + proficiency);
+        return proficiency;
     }
 }
