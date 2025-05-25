@@ -1,8 +1,5 @@
 # === Stage 1: Build ===
-FROM eclipse-temurin:21-jdk as builder
-
-# Set working directory inside container
-WORKDIR /app
+FROM eclipse-temurin:21-jdk as build
 
 # Copy Maven wrapper and project files
 COPY . .
@@ -16,11 +13,8 @@ RUN ./mvnw clean package -DskipTests
 # === Stage 2: Run ===
 FROM eclipse-temurin:21-jre
 
-# Set working directory for the runtime container
-WORKDIR /demo
-
 # Copy the built JAR file from the builder stage
-COPY --from=builder /demo/target/*.jar demo.jar
+COPY --from=build /demo/target/*.jar demo.jar
 
 # Expose the port your Spring Boot app listens on
 EXPOSE 8080
