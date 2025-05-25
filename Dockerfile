@@ -4,9 +4,6 @@ FROM eclipse-temurin:21-jdk as build
 # Copy Maven wrapper and project files
 COPY .idea .
 
-# Grant execution permissions to Maven wrapper
-RUN chmod +x mvnw
-
 # Build the application without tests
 RUN ./mvnw clean package -DskipTests
 
