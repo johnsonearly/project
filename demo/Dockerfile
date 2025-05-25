@@ -17,10 +17,10 @@ RUN ./mvnw clean package -DskipTests
 FROM eclipse-temurin:21-jre
 
 # Set working directory for the runtime container
-WORKDIR /app
+WORKDIR /demo
 
 # Copy the built JAR file from the builder stage
-COPY --from=builder /app/target/*.jar app.jar
+COPY --from=builder /demo/target/*.jar demo.jar
 
 # Expose the port your Spring Boot app listens on
 EXPOSE 8080
