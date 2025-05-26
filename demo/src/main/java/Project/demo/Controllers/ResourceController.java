@@ -10,7 +10,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("api/v1/")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "https://learning-system-back-end-nzlz.vercel.app/")
 public class ResourceController {
 
     @Autowired

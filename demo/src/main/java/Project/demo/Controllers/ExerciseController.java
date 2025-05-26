@@ -14,7 +14,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/exercises")
-@CrossOrigin(origins = "http://localhost:5173") // Ensure your frontend's origin is allowed
+@CrossOrigin(origins = "https://learning-system-back-end-nzlz.vercel.app/") // Ensure your frontend's origin is allowed
 public class ExerciseController {
 
     private static final Logger logger = LoggerFactory.getLogger(ExerciseController.class);

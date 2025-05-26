@@ -16,7 +16,7 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/app-users/")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "https://learning-system-back-end-nzlz.vercel.app")
 public class AppUserController {
     @Autowired
     public AppUserServiceImplementation userServiceImplementation;
