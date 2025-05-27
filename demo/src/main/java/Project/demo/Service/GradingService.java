@@ -41,6 +41,18 @@ public class GradingService {
         String code = submission.getCode();
         String userId = submission.getUserId();
 
+        // --- NEW: Preliminary check for valid Java code structure ---
+        if (!isLikelyJavaCode(code)) {
+            logger.warn("Submitted code for user {} (Question ID '{}') does not resemble valid Java code. Assigning 0 score.", userId, questionId);
+            GradingResult result = new GradingResult();
+            result.setScore(0.0);
+            result.setClassification("Invalid Submission");
+            result.setFeedback("The submitted code does not appear to be valid Java syntax (e.g., missing 'public class', 'import', or 'package' statements, or gibberish). Please submit actual Java code.");
+            result.setDetailedScores(new LinkedHashMap<>()); // Empty detailed scores
+            return result;
+        }
+        // --- END NEW CHECK ---
+
         String difficulty = submission.getDifficultyLevel();
         if (difficulty == null || difficulty.isBlank()) {
             difficulty = DEFAULT_DIFFICULTY;
@@ -62,13 +74,44 @@ public class GradingService {
     }
 
     /**
+     * Performs a preliminary check to see if the submitted string resembles Java code.
+     * This is a very basic check and not a full syntax validation.
+     *
+     * @param code The submitted code string.
+     * @return true if the code is likely Java, false otherwise.
+     */
+    private boolean isLikelyJavaCode(String code) {
+        if (code == null || code.trim().isEmpty()) {
+            return false;
+        }
+        String normalizedCode = code.toLowerCase();
+        // Check for common Java class/method declarations or package/import statements
+        boolean hasClassDefinition = normalizedCode.contains("public class") || normalizedCode.contains("class ");
+        boolean hasMethodDefinition = normalizedCode.contains("public static void main") || normalizedCode.contains("private void ") || normalizedCode.contains("public void ");
+        boolean hasPackageOrImport = normalizedCode.contains("package ") || normalizedCode.contains("import ");
+
+        // Consider it likely Java if it has a class/method definition OR package/import statements.
+        // Also, add a basic check for excessive non-alphanumeric characters or very short length.
+        long alphaNumericCount = normalizedCode.chars().filter(Character::isLetterOrDigit).count();
+        double ratio = (double) alphaNumericCount / normalizedCode.length();
+
+        // If the code is very short or has a very low alphanumeric ratio, it's likely gibberish.
+        if (normalizedCode.length() < 20 || ratio < 0.4) { // Thresholds can be adjusted
+            return false;
+        }
+
+        return hasClassDefinition || hasMethodDefinition || hasPackageOrImport;
+    }
+
+
+    /**
      * Core method to evaluate the submitted code against various criteria.
      *
-     * @param code           The submitted code string.
-     * @param questionId     The ID of the question.
-     * @param difficulty     The difficulty of the question.
+     * @param code The submitted code string.
+     * @param questionId The ID of the question.
+     * @param difficulty The difficulty of the question.
      * @param specificRubric Question-specific rubric scores.
-     * @param generalRubric  General rubric scores.
+     * @param generalRubric General rubric scores.
      * @return A GradingResult containing overall score, classification, feedback, and detailed scores.
      */
     private GradingResult evaluateSubmission(String code, String questionId, String difficulty,
@@ -114,8 +157,8 @@ public class GradingService {
      *
      * @param assessedLevels Raw assessment levels (0-4) for each sub-criteria.
      * @param specificRubric Question-specific rubric.
-     * @param generalRubric  General rubric.
-     * @param categoryName   The name of the category (e.g., "Problem-Solving").
+     * @param generalRubric General rubric.
+     * @param categoryName The name of the category (e.g., "Problem-Solving").
      * @param detailedScores The map to populate with criterion-level scores.
      * @return The averaged score for the category (scaled to 0-100).
      */
@@ -147,11 +190,11 @@ public class GradingService {
      * Maps a raw assessed level (e.g., 0-4 from evaluate methods) to a rubric score based on the rubric data.
      * It constructs a key like "Problem-Solving_Problem_Identification_4" and looks up the score.
      *
-     * @param categoryName   The name of the category (e.g., "Problem-Solving").
-     * @param criteria       The name of the criteria (e.g., "Problem Identification").
-     * @param assessedLevel  The raw level assessed by the internal methods (e.g., 0.0 to 4.0).
+     * @param categoryName The name of the category (e.g., "Problem-Solving").
+     * @param criteria The name of the criteria (e.g., "Problem Identification").
+     * @param assessedLevel The raw level assessed by the internal methods (e.g., 0.0 to 4.0).
      * @param specificRubric Question-specific rubric.
-     * @param generalRubric  General rubric.
+     * @param generalRubric General rubric.
      * @return The mapped rubric score (expected 0.0 to 4.0), or the assessedLevel if no rubric entry.
      */
     private double mapToRubricScore(String categoryName, String criteria, double assessedLevel,
@@ -208,7 +251,7 @@ public class GradingService {
         // - Does the solution approach directly address the core problem, not a tangential one?
         // - Could use AI to compare code logic with problem description.
         // For demo: rudimentary check for keywords related to expected problem type.
-        switch (questionId) {
+        switch(questionId) {
             case "1": // Example: Count vowels problem
                 return (code.contains("count") && (code.contains("vowel") || code.contains("aeiou") || code.contains("char"))) ? 4.0 : 1.0;
             case "2": // Example: Palindrome check
@@ -253,7 +296,7 @@ public class GradingService {
         // - Run specific edge-case test cases (e.g., empty input, max/min values, invalid formats).
         // - Analyze code for specific checks for edge conditions (e.g., array bounds, division by zero).
         // For demo: simplistic check based on problem type and keywords.
-        switch (questionId) {
+        switch(questionId) {
             case "1": // Vowel counting: check for empty string, string with no vowels, very long string
                 return (code.contains("length() == 0") || code.contains("if (s.isEmpty())")) ? 4.0 : 2.0;
             case "2": // Palindrome: check for empty string, single char, string with spaces/punctuation
@@ -615,8 +658,8 @@ public class GradingService {
      * Provides a textual assessment for a given score within a specific criteria, strictly aligned with rubric levels.
      *
      * @param categoryName The name of the category.
-     * @param criteria     The name of the criteria.
-     * @param score        The actual rubric score for the criteria (expected to be 0-4).
+     * @param criteria The name of the criteria.
+     * @param score The actual rubric score for the criteria (expected to be 0-4).
      * @return A descriptive assessment string.
      */
     private String getAssessmentForScore(String categoryName, String criteria, double score) {
@@ -642,36 +685,28 @@ public class GradingService {
                         case 0 -> "Did not correctly identify or misinterpreted the core problem.";
                         case 1 -> "Identified basic elements of the problem but missed key aspects.";
                         case 2 -> "Fully identified the problem and understood its scope accurately.";
-                        case 3 ->
-                                "Clearly identified and effectively broke down complex problems into manageable sub-problems.";
-                        case 4 ->
-                                "Demonstrated exceptional insight into problem structure, anticipating potential complexities and nuances.";
+                        case 3 -> "Clearly identified and effectively broke down complex problems into manageable sub-problems.";
+                        case 4 -> "Demonstrated exceptional insight into problem structure, anticipating potential complexities and nuances.";
                         default -> null;
                     };
                     break;
                 case "Solution Implementation":
                     specificAssessment = switch (level) {
                         case 0 -> "No functional solution was attempted, or submitted code does not run.";
-                        case 1 ->
-                                "Implemented a partial solution addressing only minimal requirements, with significant flaws.";
+                        case 1 -> "Implemented a partial solution addressing only minimal requirements, with significant flaws.";
                         case 2 -> "Implemented a functional solution that meets all specified requirements correctly.";
-                        case 3 ->
-                                "Implemented a robust and efficient solution, potentially with minor enhancements or improved clarity.";
-                        case 4 ->
-                                "Developed an elegant, highly optimized, and potentially innovative solution, significantly exceeding expectations.";
+                        case 3 -> "Implemented a robust and efficient solution, potentially with minor enhancements or improved clarity.";
+                        case 4 -> "Developed an elegant, highly optimized, and potentially innovative solution, significantly exceeding expectations.";
                         default -> null;
                     };
                     break;
                 case "Error Handling and Validation":
                     specificAssessment = switch (level) {
                         case 0 -> "No significant error handling or input validation present.";
-                        case 1 ->
-                                "Minimal error handling; issues like invalid input or unexpected states are not robustly addressed.";
+                        case 1 -> "Minimal error handling; issues like invalid input or unexpected states are not robustly addressed.";
                         case 2 -> "Includes basic error handling and input validation for common scenarios.";
-                        case 3 ->
-                                "Features comprehensive error handling and robust input validation, making the program resilient.";
-                        case 4 ->
-                                "Exemplary error handling, anticipating rare edge cases and providing clear, informative messages.";
+                        case 3 -> "Features comprehensive error handling and robust input validation, making the program resilient.";
+                        case 4 -> "Exemplary error handling, anticipating rare edge cases and providing clear, informative messages.";
                         default -> null;
                     };
                     break;
@@ -679,12 +714,9 @@ public class GradingService {
                     specificAssessment = switch (level) {
                         case 0 -> "Fails on all or most edge cases; program may crash or produce incorrect output.";
                         case 1 -> "Addresses a few obvious edge cases but struggles with less common or complex ones.";
-                        case 2 ->
-                                "Handles most standard edge cases correctly, such as empty inputs or boundary conditions.";
-                        case 3 ->
-                                "Demonstrates a thorough consideration of various edge cases, including complex and unusual scenarios.";
-                        case 4 ->
-                                "Exceptional handling of all anticipated and even some unanticipated edge cases, ensuring robust behavior.";
+                        case 2 -> "Handles most standard edge cases correctly, such as empty inputs or boundary conditions.";
+                        case 3 -> "Demonstrates a thorough consideration of various edge cases, including complex and unusual scenarios.";
+                        case 4 -> "Exceptional handling of all anticipated and even some unanticipated edge cases, ensuring robust behavior.";
                         default -> null;
                     };
                     break;
@@ -692,12 +724,9 @@ public class GradingService {
                     specificAssessment = switch (level) {
                         case 0 -> "No evidence of testing the solution; functionality is unverified.";
                         case 1 -> "Includes very rudimentary manual tests or implicit testing from execution.";
-                        case 2 ->
-                                "Provides basic test cases that cover typical scenarios, demonstrating some verification.";
-                        case 3 ->
-                                "Features a reasonable set of test cases, including some edge cases, providing good coverage.";
-                        case 4 ->
-                                "Comprehensive test suite (e.g., using JUnit), covering typical, edge, and potentially stress cases, ensuring high confidence in correctness.";
+                        case 2 -> "Provides basic test cases that cover typical scenarios, demonstrating some verification.";
+                        case 3 -> "Features a reasonable set of test cases, including some edge cases, providing good coverage.";
+                        case 4 -> "Comprehensive test suite (e.g., using JUnit), covering typical, edge, and potentially stress cases, ensuring high confidence in correctness.";
                         default -> null;
                     };
                     break;
@@ -709,41 +738,30 @@ public class GradingService {
                 case "Debugging":
                     specificAssessment = switch (level) {
                         case 0 -> "Code contains obvious bugs; no systematic debugging approach is evident.";
-                        case 1 ->
-                                "Attempts at debugging are visible (e.g., print statements), but issues persist or are difficult to resolve.";
-                        case 2 ->
-                                "Demonstrates a basic ability to identify and fix bugs, often through trial and error.";
-                        case 3 ->
-                                "Applies systematic debugging strategies, effectively isolating and resolving issues with logical steps.";
-                        case 4 ->
-                                "Exceptional debugging skills, quickly identifying root causes and implementing elegant fixes; code is generally robust.";
+                        case 1 -> "Attempts at debugging are visible (e.g., print statements), but issues persist or are difficult to resolve.";
+                        case 2 -> "Demonstrates a basic ability to identify and fix bugs, often through trial and error.";
+                        case 3 -> "Applies systematic debugging strategies, effectively isolating and resolving issues with logical steps.";
+                        case 4 -> "Exceptional debugging skills, quickly identifying root causes and implementing elegant fixes; code is generally robust.";
                         default -> null;
                     };
                     break;
                 case "Code Optimization":
                     specificAssessment = switch (level) {
-                        case 0 ->
-                                "Code is highly inefficient; performance is severely impacted by poor design choices.";
+                        case 0 -> "Code is highly inefficient; performance is severely impacted by poor design choices.";
                         case 1 -> "Minimal consideration for optimization; basic operations might be inefficient.";
-                        case 2 ->
-                                "Shows awareness of performance; attempts some basic optimizations without sacrificing clarity.";
-                        case 3 ->
-                                "Implements efficient algorithms and data structures where appropriate, optimizing for common scenarios.";
-                        case 4 ->
-                                "Highly optimized solution, demonstrating deep understanding of performance trade-offs and algorithmic complexity.";
+                        case 2 -> "Shows awareness of performance; attempts some basic optimizations without sacrificing clarity.";
+                        case 3 -> "Implements efficient algorithms and data structures where appropriate, optimizing for common scenarios.";
+                        case 4 -> "Highly optimized solution, demonstrating deep understanding of performance trade-offs and algorithmic complexity.";
                         default -> null;
                     };
                     break;
                 case "Evaluation of Logic":
                     specificAssessment = switch (level) {
                         case 0 -> "Logical flow is flawed or contradictory, leading to incorrect behavior.";
-                        case 1 ->
-                                "Logic is partially sound but contains gaps or inconsistencies, leading to unpredictable results.";
+                        case 1 -> "Logic is partially sound but contains gaps or inconsistencies, leading to unpredictable results.";
                         case 2 -> "The underlying logic of the program is generally sound and correctly implemented.";
-                        case 3 ->
-                                "Demonstrates strong logical reasoning, with a clear, well-structured, and verifiable flow of control.";
-                        case 4 ->
-                                "Exceptional logical design; the solution is elegant, concise, and demonstrably correct under all conditions.";
+                        case 3 -> "Demonstrates strong logical reasoning, with a clear, well-structured, and verifiable flow of control.";
+                        case 4 -> "Exceptional logical design; the solution is elegant, concise, and demonstrably correct under all conditions.";
                         default -> null;
                     };
                     break;
@@ -751,27 +769,19 @@ public class GradingService {
                     specificAssessment = switch (level) {
                         case 0 -> "Repeated code blocks or redundant logic indicate a lack of pattern recognition.";
                         case 1 -> "Some patterns are recognized but not fully abstracted or generalized.";
-                        case 2 ->
-                                "Identifies and abstracts common patterns into reusable functions or loops, improving code structure.";
-                        case 3 ->
-                                "Consistently recognizes and effectively applies common design patterns or algorithmic structures.";
-                        case 4 ->
-                                "Exemplary pattern recognition, abstracting complex behaviors into highly reusable and maintainable components.";
+                        case 2 -> "Identifies and abstracts common patterns into reusable functions or loops, improving code structure.";
+                        case 3 -> "Consistently recognizes and effectively applies common design patterns or algorithmic structures.";
+                        case 4 -> "Exemplary pattern recognition, abstracting complex behaviors into highly reusable and maintainable components.";
                         default -> null;
                     };
                     break;
                 case "Conditional Thinking":
                     specificAssessment = switch (level) {
-                        case 0 ->
-                                "Ineffective or incorrect use of conditionals; logic branches are not properly controlled.";
-                        case 1 ->
-                                "Basic use of 'if' statements, but 'else' or complex conditions are absent or misused.";
-                        case 2 ->
-                                "Appropriately uses 'if-else' structures to control program flow based on conditions.";
-                        case 3 ->
-                                "Skilfully employs complex conditional logic (e.g., nested conditions, logical operators, switch statements) to handle diverse scenarios.";
-                        case 4 ->
-                                "Masterful application of conditional logic, resulting in highly readable, efficient, and robust decision-making within the code.";
+                        case 0 -> "Ineffective or incorrect use of conditionals; logic branches are not properly controlled.";
+                        case 1 -> "Basic use of 'if' statements, but 'else' or complex conditions are absent or misused.";
+                        case 2 -> "Appropriately uses 'if-else' structures to control program flow based on conditions.";
+                        case 3 -> "Skilfully employs complex conditional logic (e.g., nested conditions, logical operators, switch statements) to handle diverse scenarios.";
+                        case 4 -> "Masterful application of conditional logic, resulting in highly readable, efficient, and robust decision-making within the code.";
                         default -> null;
                     };
                     break;
@@ -783,81 +793,60 @@ public class GradingService {
                 case "Use of Variables":
                     specificAssessment = switch (level) {
                         case 0 -> "Variables are undefined, misused, or lead to errors; poor naming conventions.";
-                        case 1 ->
-                                "Variables are declared but may be poorly named, incorrectly scoped, or uninitialized.";
-                        case 2 ->
-                                "Variables are generally used correctly, with appropriate types and basic naming conventions.";
-                        case 3 ->
-                                "Variables are named meaningfully, correctly scoped, and consistently initialized, enhancing readability and maintainability.";
-                        case 4 ->
-                                "Exceptional variable usage; employs advanced techniques (e.g., immutability, destructuring where applicable) for robust and clear state management.";
+                        case 1 -> "Variables are declared but may be poorly named, incorrectly scoped, or uninitialized.";
+                        case 2 -> "Variables are generally used correctly, with appropriate types and basic naming conventions.";
+                        case 3 -> "Variables are named meaningfully, correctly scoped, and consistently initialized, enhancing readability and maintainability.";
+                        case 4 -> "Exceptional variable usage; employs advanced techniques (e.g., immutability, destructuring where applicable) for robust and clear state management.";
                         default -> null;
                     };
                     break;
                 case "Use of Loops":
                     specificAssessment = switch (level) {
                         case 0 -> "Loops are absent when needed, or cause infinite loops/incorrect iterations.";
-                        case 1 ->
-                                "Attempts to use loops are present, but with off-by-one errors or incorrect termination conditions.";
+                        case 1 -> "Attempts to use loops are present, but with off-by-one errors or incorrect termination conditions.";
                         case 2 -> "Appropriately uses basic loop structures (for, while) to perform repetitive tasks.";
-                        case 3 ->
-                                "Effectively employs various loop types (for, while, do-while, for-each) for different iterative needs, with correct termination.";
-                        case 4 ->
-                                "Masterful use of loops, including complex iterations, nested loops, and stream-based operations where appropriate, for concise and efficient repetition.";
+                        case 3 -> "Effectively employs various loop types (for, while, do-while, for-each) for different iterative needs, with correct termination.";
+                        case 4 -> "Masterful use of loops, including complex iterations, nested loops, and stream-based operations where appropriate, for concise and efficient repetition.";
                         default -> null;
                     };
                     break;
                 case "Use of Conditionals":
                     specificAssessment = switch (level) {
                         case 0 -> "Conditionals are absent when logic branches are needed, or are incorrectly formed.";
-                        case 1 ->
-                                "Basic 'if' statements are present, but 'else' branches or complex logical conditions are often missed.";
+                        case 1 -> "Basic 'if' statements are present, but 'else' branches or complex logical conditions are often missed.";
                         case 2 -> "Correctly uses 'if-else' statements to implement decision-making logic.";
-                        case 3 ->
-                                "Skilfully uses a range of conditional constructs (if-else if-else, switch, ternary operator) for clear and effective decision paths.";
-                        case 4 ->
-                                "Exemplary use of conditional logic; code is highly readable, covers all logical paths efficiently, and avoids redundant checks.";
+                        case 3 -> "Skilfully uses a range of conditional constructs (if-else if-else, switch, ternary operator) for clear and effective decision paths.";
+                        case 4 -> "Exemplary use of conditional logic; code is highly readable, covers all logical paths efficiently, and avoids redundant checks.";
                         default -> null;
                     };
                     break;
                 case "Procedures & Functions":
                     specificAssessment = switch (level) {
                         case 0 -> "Code is a monolithic block; no clear separation of concerns into functions/methods.";
-                        case 1 ->
-                                "Some attempt to use functions, but they are poorly defined, excessively long, or have unclear responsibilities.";
-                        case 2 ->
-                                "Breaks down code into functions/methods with clear responsibilities, improving modularity.";
-                        case 3 ->
-                                "Designs functions/methods with high cohesion and low coupling, promoting reusability and maintainability.";
-                        case 4 ->
-                                "Architects a highly modular solution with well-defined, testable functions/methods, demonstrating strong software engineering principles.";
+                        case 1 -> "Some attempt to use functions, but they are poorly defined, excessively long, or have unclear responsibilities.";
+                        case 2 -> "Breaks down code into functions/methods with clear responsibilities, improving modularity.";
+                        case 3 -> "Designs functions/methods with high cohesion and low coupling, promoting reusability and maintainability.";
+                        case 4 -> "Architects a highly modular solution with well-defined, testable functions/methods, demonstrating strong software engineering principles.";
                         default -> null;
                     };
                     break;
                 case "Use of Operators & Expressions":
                     specificAssessment = switch (level) {
                         case 0 -> "Incorrect or missing operators lead to compilation errors or wrong computations.";
-                        case 1 ->
-                                "Uses basic arithmetic and assignment operators; struggles with relational or logical operators.";
-                        case 2 ->
-                                "Correctly uses a variety of arithmetic, relational, and logical operators in expressions.";
-                        case 3 ->
-                                "Demonstrates a solid understanding of operator precedence and effectively constructs complex, correct expressions.";
-                        case 4 ->
-                                "Masterful application of operators and expressions, leading to concise, efficient, and mathematically sound computations.";
+                        case 1 -> "Uses basic arithmetic and assignment operators; struggles with relational or logical operators.";
+                        case 2 -> "Correctly uses a variety of arithmetic, relational, and logical operators in expressions.";
+                        case 3 -> "Demonstrates a solid understanding of operator precedence and effectively constructs complex, correct expressions.";
+                        case 4 -> "Masterful application of operators and expressions, leading to concise, efficient, and mathematically sound computations.";
                         default -> null;
                     };
                     break;
                 case "Program Initialization":
                     specificAssessment = switch (level) {
-                        case 0 ->
-                                "Critical variables or resources are not initialized, leading to runtime errors or undefined behavior.";
+                        case 0 -> "Critical variables or resources are not initialized, leading to runtime errors or undefined behavior.";
                         case 1 -> "Some initialization occurs, but it's inconsistent or misses key components.";
                         case 2 -> "Most necessary variables and components are properly initialized before use.";
-                        case 3 ->
-                                "Ensures all variables and resources are systematically initialized, considering default states and potential external dependencies.";
-                        case 4 ->
-                                "Exemplary initialization practices, including robust setup for complex objects and careful management of program state from start-up.";
+                        case 3 -> "Ensures all variables and resources are systematically initialized, considering default states and potential external dependencies.";
+                        case 4 -> "Exemplary initialization practices, including robust setup for complex objects and careful management of program state from start-up.";
                         default -> null;
                     };
                     break;
@@ -866,10 +855,8 @@ public class GradingService {
                         case 0 -> "Program does not terminate cleanly; may crash or run indefinitely (infinite loops).";
                         case 1 -> "Program terminates, but may leave resources open or exit abruptly without cleanup.";
                         case 2 -> "Program terminates as expected upon completion of its task.";
-                        case 3 ->
-                                "Ensures graceful termination, closing resources (e.g., file streams) and providing appropriate exit codes or messages.";
-                        case 4 ->
-                                "Demonstrates sophisticated termination handling, including comprehensive resource cleanup, error reporting, and controlled shutdown procedures.";
+                        case 3 -> "Ensures graceful termination, closing resources (e.g., file streams) and providing appropriate exit codes or messages.";
+                        case 4 -> "Demonstrates sophisticated termination handling, including comprehensive resource cleanup, error reporting, and controlled shutdown procedures.";
                         default -> null;
                     };
                     break;
@@ -883,67 +870,48 @@ public class GradingService {
                         case 0 -> "Solution is entirely conventional or directly copied, showing no original thought.";
                         case 1 -> "Solution is mostly conventional, with very minor unique elements or variations.";
                         case 2 -> "Introduces some original elements or a fresh perspective to a common problem.";
-                        case 3 ->
-                                "Demonstrates a distinctly original approach or implements unique features not typically found in standard solutions.";
-                        case 4 ->
-                                "Highly original and unique solution, showcasing exceptional creativity and independent thought, potentially inspiring new approaches.";
+                        case 3 -> "Demonstrates a distinctly original approach or implements unique features not typically found in standard solutions.";
+                        case 4 -> "Highly original and unique solution, showcasing exceptional creativity and independent thought, potentially inspiring new approaches.";
                         default -> null;
                     };
                     break;
                 case "Innovative Problem Approach":
                     specificAssessment = switch (level) {
                         case 0 -> "Uses a standard, uninspired, or inefficient approach to the problem.";
-                        case 1 ->
-                                "Attempts a slightly different approach, but it lacks innovation or significant benefit.";
-                        case 2 ->
-                                "Adopts a non-obvious yet effective approach, showing a degree of innovative thinking.";
-                        case 3 ->
-                                "Employs a genuinely innovative technique or algorithm that significantly improves the solution's elegance, efficiency, or scalability.";
-                        case 4 ->
-                                "Presents a groundbreaking or highly inventive approach that redefines the problem's solution space, pushing boundaries.";
+                        case 1 -> "Attempts a slightly different approach, but it lacks innovation or significant benefit.";
+                        case 2 -> "Adopts a non-obvious yet effective approach, showing a degree of innovative thinking.";
+                        case 3 -> "Employs a genuinely innovative technique or algorithm that significantly improves the solution's elegance, efficiency, or scalability.";
+                        case 4 -> "Presents a groundbreaking or highly inventive approach that redefines the problem's solution space, pushing boundaries.";
                         default -> null;
                     };
                     break;
                 case "Creative Expansion of Problem":
                     specificAssessment = switch (level) {
                         case 0 -> "Does not address or expand upon the problem beyond minimum requirements.";
-                        case 1 ->
-                                "Adds minor, superficial features that don't significantly enhance the solution or user experience.";
-                        case 2 ->
-                                "Includes thoughtful extra features or functionalities that enhance the problem's scope or user interaction.";
-                        case 3 ->
-                                "Significantly expands the problem's scope, adding valuable, well-implemented features that were not explicitly requested.";
-                        case 4 ->
-                                "Transforms the problem into a richer, more comprehensive experience with unexpected, highly valuable, and well-integrated creative expansions.";
+                        case 1 -> "Adds minor, superficial features that don't significantly enhance the solution or user experience.";
+                        case 2 -> "Includes thoughtful extra features or functionalities that enhance the problem's scope or user interaction.";
+                        case 3 -> "Significantly expands the problem's scope, adding valuable, well-implemented features that were not explicitly requested.";
+                        case 4 -> "Transforms the problem into a richer, more comprehensive experience with unexpected, highly valuable, and well-integrated creative expansions.";
                         default -> null;
                     };
                     break;
                 case "Code Organization and Clarity":
                     specificAssessment = switch (level) {
-                        case 0 ->
-                                "Code is disorganized, unclear, and lacks comments, making it very difficult to understand.";
-                        case 1 ->
-                                "Code has minimal organization or comments; difficult to follow without significant effort.";
-                        case 2 ->
-                                "Code is reasonably organized with some comments and consistent formatting, making it generally understandable.";
-                        case 3 ->
-                                "Well-organized code with meaningful comments, consistent style, and logical structure, enhancing readability and maintainability.";
-                        case 4 ->
-                                "Exemplary code organization and clarity; self-documenting code with excellent structure, formatting, and insightful comments, setting a high standard.";
+                        case 0 -> "Code is disorganized, unclear, and lacks comments, making it very difficult to understand.";
+                        case 1 -> "Code has minimal organization or comments; difficult to follow without significant effort.";
+                        case 2 -> "Code is reasonably organized with some comments and consistent formatting, making it generally understandable.";
+                        case 3 -> "Well-organized code with meaningful comments, consistent style, and logical structure, enhancing readability and maintainability.";
+                        case 4 -> "Exemplary code organization and clarity; self-documenting code with excellent structure, formatting, and insightful comments, setting a high standard.";
                         default -> null;
                     };
                     break;
                 case "Exploration of Alternatives":
                     specificAssessment = switch (level) {
                         case 0 -> "Shows no evidence of considering alternative solutions or approaches.";
-                        case 1 ->
-                                "Limited evidence of exploring alternatives; may mention but not implement or analyze them.";
-                        case 2 ->
-                                "Demonstrates awareness of alternative solutions, potentially by implementing or discussing one other approach.";
-                        case 3 ->
-                                "Explored and analyzed multiple viable alternative solutions, demonstrating a thoughtful selection process for the chosen approach.";
-                        case 4 ->
-                                "Conducted a thorough exploration of diverse alternative solutions, providing clear justifications for the chosen path, reflecting deep analytical thought.";
+                        case 1 -> "Limited evidence of exploring alternatives; may mention but not implement or analyze them.";
+                        case 2 -> "Demonstrates awareness of alternative solutions, potentially by implementing or discussing one other approach.";
+                        case 3 -> "Explored and analyzed multiple viable alternative solutions, demonstrating a thoughtful selection process for the chosen approach.";
+                        case 4 -> "Conducted a thorough exploration of diverse alternative solutions, providing clear justifications for the chosen path, reflecting deep analytical thought.";
                         default -> null;
                     };
                     break;
@@ -964,7 +932,6 @@ public class GradingService {
 
     /**
      * Classifies the total score into a broad category.
-     *
      * @param score The total score (0-100).
      * @return A String classification (e.g., "Excellent", "Good", "Average", "Needs Improvement").
      */
@@ -974,4 +941,5 @@ public class GradingService {
         if (score >= 50) return ProficiencyLevel.BEGINNER.name(); // Changed to Beginner for 50-74
         return "Needs Improvement"; // Below 50
     }
+
 }
