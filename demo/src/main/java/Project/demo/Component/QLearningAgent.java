@@ -84,9 +84,9 @@ public class QLearningAgent {
     private double calculateReward(double averageScore) {
         double normalizedScore = averageScore / 100.0;
 
-        if (normalizedScore >= 0.9) { // Perfect or near-perfect score
+        if (normalizedScore >= 0.6) { // Perfect or near-perfect score
             return 10.0; // Strong positive reward
-        } else if (normalizedScore >= 0.6) { // Good score (e.g., > 60%)
+        } else if (normalizedScore >= 0.4) { // Good score (e.g., > 60%)
             return 5.0;  // Moderate positive reward
         } else if (normalizedScore > 0.0) { // Partial score (e.g., 1% - 59%)
             return -2.0; // Small penalty for not mastering
