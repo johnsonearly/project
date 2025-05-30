@@ -36,7 +36,7 @@ public class AppUserServiceImplementation {
     }
     public ResponseEntity<String> logUserIn(LoginDTO loginDTO) {
         Optional<AppUser> appUser = appUserInterface.findByUserId(loginDTO.getUserId());
-        return appUser.map(user -> ResponseEntity.ok(user.getUserId())).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + loginDTO.getUserId()));
+        return appUser.map(user -> ResponseEntity.ok(user.getUserName())).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + loginDTO.getUserId()));
     }
     public String updateUser(String userId, String recommendedLevel) {
 
