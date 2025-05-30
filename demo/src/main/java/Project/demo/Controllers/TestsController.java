@@ -25,7 +25,7 @@ public class TestsController {
 
     // To create the Post test entity
 
-    @PostMapping("/createPostTest/{userName}")
+    @PostMapping("g")
     public void createPostTest(@RequestBody PostTest postTest, @PathVariable String userName){
         posttestServiceImplementation.createPosttest(userName, postTest);
     }
