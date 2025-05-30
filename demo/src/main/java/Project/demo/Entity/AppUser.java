@@ -12,7 +12,7 @@ public class AppUser {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
-    private String userId;
+    private String userName;
     private String name;
     private UserRole role;
     private String password;

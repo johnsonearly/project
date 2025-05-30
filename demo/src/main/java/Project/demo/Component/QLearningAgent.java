@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors; // Added for stream operations
 
 @Component
 public class QLearningAgent {
@@ -32,10 +33,32 @@ public class QLearningAgent {
     // File path for Q-table persistence
     private static final String Q_TABLE_FILE = "q_tables.ser";
 
+    // --- NEW: Evaluation Metrics ---
+    private long totalCyclesCompleted;
+    private long totalExplorationActions;
+    private long totalExploitationActions;
+    private double totalAccumulatedReward;
+    private final ConcurrentHashMap<String, DoubleSummaryStatistics> scoresPerDifficulty; // Tracks avg/min/max scores per difficulty served
+    private long totalLikesFeedback;
+    private long totalDislikesFeedback;
+    private final ConcurrentHashMap<String, int[]> userProgressionCounts; // Tracks how many times each user changed difficulty: [up, down, same]
+
     public QLearningAgent() {
         this.qTables = loadQTables();
         this.userLastChosenDifficultyIndex = new ConcurrentHashMap<>();
         this.userExplorationRates = new ConcurrentHashMap<>();
+
+        // --- NEW: Initialize Metrics ---
+        this.totalCyclesCompleted = 0;
+        this.totalExplorationActions = 0;
+        this.totalExploitationActions = 0;
+        this.totalAccumulatedReward = 0.0;
+        this.scoresPerDifficulty = new ConcurrentHashMap<>();
+        VALID_DIFFICULTIES.forEach(diff -> scoresPerDifficulty.put(diff, new DoubleSummaryStatistics()));
+        this.totalLikesFeedback = 0;
+        this.totalDislikesFeedback = 0;
+        this.userProgressionCounts = new ConcurrentHashMap<>(); // [0]=up, [1]=down, [2]=same
+
         System.out.println("QLearningAgent initialized. Loaded " + qTables.size() + " Q-tables.");
     }
 
@@ -84,9 +107,9 @@ public class QLearningAgent {
     private double calculateReward(double averageScore) {
         double normalizedScore = averageScore / 100.0;
 
-        if (normalizedScore >= 0.6) { // Perfect or near-perfect score
+        if (normalizedScore >= 0.9) { // Perfect or near-perfect score
             return 10.0; // Strong positive reward
-        } else if (normalizedScore >= 0.4) { // Good score (e.g., > 60%)
+        } else if (normalizedScore >= 0.6) { // Good score (e.g., > 60%)
             return 5.0;  // Moderate positive reward
         } else if (normalizedScore > 0.0) { // Partial score (e.g., 1% - 59%)
             return -2.0; // Small penalty for not mastering
@@ -119,10 +142,12 @@ public class QLearningAgent {
         if (Math.random() < currentExplorationRate) {
             // Exploration: Choose a random difficulty
             chosenActionIndex = new Random().nextInt(NUM_DIFFICULTIES);
+            totalExplorationActions++; // --- NEW: Metric Update ---
             System.out.println("User " + userId + ": Exploring, chose random difficulty " + getDifficultyFromIndex(chosenActionIndex) + " (Exp. Rate: " + String.format("%.2f", currentExplorationRate) + ")");
         } else {
             // Exploitation: Choose the difficulty with the highest Q-value from the current state
             chosenActionIndex = getMaxAction(qTable, currentStateIndex);
+            totalExploitationActions++; // --- NEW: Metric Update ---
             System.out.println("User " + userId + ": Exploiting, chose difficulty " + getDifficultyFromIndex(chosenActionIndex) + " (Exp. Rate: " + String.format("%.2f", currentExplorationRate) + ")");
         }
 
@@ -146,20 +171,37 @@ public class QLearningAgent {
      */
     public synchronized void updateQValuesAfterCycle(String userId, double averageScore, String difficultyServedInCycle) {
         double[][] qTable = qTables.computeIfAbsent(userId, k -> initializeQTable());
+        totalCyclesCompleted++; // --- NEW: Metric Update ---
 
         // The state is the difficulty the user was *in* when they were served the questions
         int currentStateIndex = getDifficultyIndex(difficultyServedInCycle);
 
-        // The action is the difficulty that was *chosen* for the user to practice (which is `difficultyServedInCycle`)
-        // We ensure that the 'action' corresponds to the 'state' that was just experienced.
+
         int actionTakenIndex = getDifficultyIndex(difficultyServedInCycle);
 
 
         double reward = calculateReward(averageScore);
+        totalAccumulatedReward += reward;
 
-        // Determine the 'next state' based on performance in this cycle
-        // This is a crucial part where performance dictates proficiency change.
+        // --- NEW: Update scoresPerDifficulty ---
+        scoresPerDifficulty.computeIfPresent(difficultyServedInCycle, (k, stats) -> {
+            stats.accept(averageScore);
+            return stats;
+        });
+
+
         int nextStateIndex = determineNextStateFromScore(averageScore, currentStateIndex);
+
+        // --- NEW: Update user progression counts ---
+        userProgressionCounts.computeIfAbsent(userId, k -> new int[3]); // [up, down, same]
+        int[] counts = userProgressionCounts.get(userId);
+        if (nextStateIndex > currentStateIndex) {
+            counts[0]++; // Upgraded
+        } else if (nextStateIndex < currentStateIndex) {
+            counts[1]++; // Downgraded
+        } else {
+            counts[2]++; // Stayed same
+        }
 
 
         // Q-learning formula:
@@ -212,9 +254,11 @@ public class QLearningAgent {
         double feedbackReward = 0.0;
         if ("Like".equalsIgnoreCase(feedbackType)) {
             feedbackReward = 5.0; // Positive reinforcement for good exercises
+            totalLikesFeedback++; // --- NEW: Metric Update ---
             System.out.println("User " + userId + " liked difficulty " + exerciseDifficulty + ". Applying positive feedback reward.");
         } else if ("Dislike".equalsIgnoreCase(feedbackType)) {
             feedbackReward = -5.0; // Negative reinforcement for bad exercises
+            totalDislikesFeedback++; // --- NEW: Metric Update ---
             System.out.println("User " + userId + " disliked difficulty " + exerciseDifficulty + ". Applying negative feedback reward.");
         } else {
             System.err.println("Invalid feedback type: " + feedbackType + " for user " + userId);
@@ -336,11 +380,16 @@ public class QLearningAgent {
         return new ConcurrentHashMap<>();
     }
 
-    // --- Utility method to reset Q-table for a user (for testing) ---
+    /**
+     * Resets the Q-table and related state for a specific user.
+     * This is useful for testing or when a user's progress needs to be completely wiped.
+     * @param userId The ID of the user to reset.
+     */
     public void resetUserQTable(String userId) {
         qTables.remove(userId);
         userLastChosenDifficultyIndex.remove(userId);
         userExplorationRates.remove(userId);
+        userProgressionCounts.remove(userId); // --- NEW: Reset Metric ---
         saveQTables();
         System.out.println("Q-table and state for user " + userId + " reset.");
     }
@@ -390,5 +439,107 @@ public class QLearningAgent {
         String proficiency = getDifficultyFromIndex(proficiencyIndex);
         System.out.println("User " + userId + ": Evaluated proficiency based on Q-Learning state: " + proficiency);
         return proficiency;
+    }
+
+    /**
+     * Manually sets a user's proficiency level.
+     * This method directly updates the agent's internal belief about the user's current proficiency.
+     *
+     * IMPORTANT: Use this method with caution, as it bypasses the natural learning process of the Q-agent.
+     * The agent will continue to learn from this new proficiency level moving forward.
+     *
+     * @param userId The ID of the AppUser whose proficiency is to be set.
+     * @param newProficiency The desired proficiency level as a string (e.g., "Beginner", "Intermediate", "Advanced").
+     */
+    public synchronized void setUserProficiency(String userId, String newProficiency) {
+        // Ensure a Q-table exists for the user, even if we are just setting their proficiency
+        qTables.computeIfAbsent(userId, k -> initializeQTable());
+
+        int newProficiencyIndex = getDifficultyIndex(newProficiency);
+        userLastChosenDifficultyIndex.put(userId, newProficiencyIndex);
+
+        // Optionally, reset exploration rate when manually setting proficiency,
+        // to encourage fresh exploration from this new state.
+        userExplorationRates.put(userId, EXPLORATION_RATE_INITIAL);
+
+        saveQTables(); // Persist the change
+
+        System.out.println("Manually set proficiency for user " + userId + " to " + getDifficultyFromIndex(newProficiencyIndex));
+    }
+
+    // --- NEW: Public method to retrieve evaluation metrics ---
+
+    /**
+     * Retrieves a summary of the Q-Learning Agent's global evaluation metrics.
+     * This provides insights into the agent's overall behavior and performance.
+     *
+     * @return A map containing various evaluation metrics.
+     */
+    public Map<String, Object> getEvaluationMetrics() {
+        Map<String, Object> metrics = new LinkedHashMap<>();
+
+        // 1. Agent Behavior Metrics
+        metrics.put("totalCyclesCompleted", totalCyclesCompleted);
+        metrics.put("totalExplorationActions", totalExplorationActions);
+        metrics.put("totalExploitationActions", totalExploitationActions);
+        long totalActions = totalExplorationActions + totalExploitationActions;
+        metrics.put("explorationRateCurrent", String.format("%.2f", userExplorationRates.values().stream().mapToDouble(d -> d).average().orElse(EXPLORATION_RATE_INITIAL)));
+        metrics.put("explorationRatio", totalActions > 0 ? String.format("%.2f", (double) totalExplorationActions / totalActions) : "N/A");
+        metrics.put("exploitationRatio", totalActions > 0 ? String.format("%.2f", (double) totalExploitationActions / totalActions) : "N/A");
+
+        // 2. Performance Metrics
+        metrics.put("totalAccumulatedReward", String.format("%.2f", totalAccumulatedReward));
+        metrics.put("averageRewardPerCycle", totalCyclesCompleted > 0 ? String.format("%.2f", totalAccumulatedReward / totalCyclesCompleted) : "N/A");
+
+        Map<String, String> avgScores = new LinkedHashMap<>();
+        scoresPerDifficulty.forEach((diff, stats) ->
+                avgScores.put(diff, String.format("%.2f", stats.getAverage()))
+        );
+        metrics.put("averageScorePerDifficulty", avgScores);
+
+        // 3. Engagement Metrics
+        metrics.put("totalLikesFeedback", totalLikesFeedback);
+        metrics.put("totalDislikesFeedback", totalDislikesFeedback);
+        long totalFeedback = totalLikesFeedback + totalDislikesFeedback;
+        metrics.put("feedbackLikeRatio", totalFeedback > 0 ? String.format("%.2f", (double) totalLikesFeedback / totalFeedback) : "N/A");
+        metrics.put("feedbackDislikeRatio", totalFeedback > 0 ? String.format("%.2f", (double) totalDislikesFeedback / totalFeedback) : "N/A");
+
+        // 4. Progression Metrics (Global Summary)
+        long totalUpgrades = userProgressionCounts.values().stream().mapToInt(counts -> counts[0]).sum();
+        long totalDowngrades = userProgressionCounts.values().stream().mapToInt(counts -> counts[1]).sum();
+        long totalStayedSame = userProgressionCounts.values().stream().mapToInt(counts -> counts[2]).sum();
+
+        metrics.put("totalDifficultyUpgrades", totalUpgrades);
+        metrics.put("totalDifficultyDowngrades", totalDowngrades);
+        metrics.put("totalDifficultyStayedSame", totalStayedSame);
+
+        long totalUserTransitions = totalUpgrades + totalDowngrades + totalStayedSame;
+        metrics.put("upgradeRatio", totalUserTransitions > 0 ? String.format("%.2f", (double) totalUpgrades / totalUserTransitions) : "N/A");
+        metrics.put("downgradeRatio", totalUserTransitions > 0 ? String.format("%.2f", (double) totalDowngrades / totalUserTransitions) : "N/A");
+        metrics.put("staySameRatio", totalUserTransitions > 0 ? String.format("%.2f", (double) totalStayedSame / totalUserTransitions) : "N/A");
+
+        // Current distribution of users by proficiency
+        Map<String, Long> userProficiencyDistribution = userLastChosenDifficultyIndex.values().stream()
+                .map(this::getDifficultyFromIndex)
+                .collect(Collectors.groupingBy(s -> s, Collectors.counting()));
+        metrics.put("currentUserProficiencyDistribution", userProficiencyDistribution);
+
+        return metrics;
+    }
+
+    /**
+     * Resets all global evaluation metrics. Useful for starting a new evaluation period.
+     */
+    public synchronized void resetEvaluationMetrics() {
+        this.totalCyclesCompleted = 0;
+        this.totalExplorationActions = 0;
+        this.totalExploitationActions = 0;
+        this.totalAccumulatedReward = 0.0;
+        this.scoresPerDifficulty.forEach((diff, stats) -> scoresPerDifficulty.put(diff, new DoubleSummaryStatistics())); // Reset statistics
+        this.totalLikesFeedback = 0;
+        this.totalDislikesFeedback = 0;
+        this.userProgressionCounts.clear(); // Clear all user-specific progression counts
+
+        System.out.println("All QLearningAgent evaluation metrics have been reset.");
     }
 }

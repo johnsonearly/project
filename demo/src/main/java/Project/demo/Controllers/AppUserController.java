@@ -49,9 +49,9 @@ public class AppUserController {
     }
 
     @PutMapping("update/{userId}")
-    public String updateUser(@PathVariable  String userId){
+    public String updateUser(@PathVariable  String userId, @RequestBody String recommendedLevel){
 
-        return userServiceImplementation.updateUser(userId);
+        return userServiceImplementation.updateUser(userId,recommendedLevel);
 
     }
 
