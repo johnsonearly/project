@@ -26,7 +26,7 @@ WORKDIR /demo
 COPY --from=builder /app/target/*.jar demo.jar
 
 # Copy the qtable.ser file from your project (host) to the container
-COPY demo/qtables.ser qtables.ser
+COPY q_tables.ser qtables.ser
 
 # Expose the port the Spring Boot application runs on
 EXPOSE 8080
