@@ -478,7 +478,7 @@ public class ExerciseServiceImpl {
      * @param questionDifficulty The difficulty of the question associated with the score.
      */
     public void updateUserProficiency(String userId, double score, String questionDifficulty) {
-        AppUser user = userRepository.findByUserId(userId).orElse(null);
+        AppUser user = userRepository.findByUserName(userId).orElse(null);
         if (user != null) {
             String currentProficiency = user.getProficiency();
             int currentProficiencyIndex = VALID_DIFFICULTIES.indexOf(validateDifficulty(currentProficiency));

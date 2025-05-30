@@ -35,12 +35,12 @@ public class AppUserServiceImplementation {
         return appUserInterface.findById(id);
     }
     public ResponseEntity<String> logUserIn(LoginDTO loginDTO) {
-        Optional<AppUser> appUser = appUserInterface.findByUserId(loginDTO.getUserId());
-        return appUser.map(user -> ResponseEntity.ok(user.getUserName())).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + loginDTO.getUserId()));
+        Optional<AppUser> appUser = appUserInterface.findByUserName(loginDTO.getUserName());
+        return appUser.map(user -> ResponseEntity.ok(user.getUserName())).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with ID: " + loginDTO.getUserName()));
     }
-    public String updateUser(String userId, String recommendedLevel) {
+    public String updateUser(String userName, String recommendedLevel) {
 
-        Optional<AppUser> userOptional = appUserInterface.findByUserId(userId);
+        Optional<AppUser> userOptional = appUserInterface.findByUserName(userName);
 
         if (userOptional.isPresent()) {
             AppUser user = userOptional.get();
@@ -50,8 +50,8 @@ public class AppUserServiceImplementation {
 
         return recommendedLevel;
     }
-    public AppUser getUser(String userId){
-        Optional<AppUser> appUser = appUserInterface.findByUserId(userId);
+    public AppUser getUser(String userName){
+        Optional<AppUser> appUser = appUserInterface.findByUserName(userName);
         return appUser.get();
     }
 
