@@ -26,14 +26,20 @@ public class TestsController {
     // To create the Post test entity
 
     @PostMapping("/createPostTest/{userName}")
-    public void createPostTest(@RequestBody PostTest postTest, @PathVariable String userName){
+    public void createPostTest(@RequestBody float averageScore, @PathVariable String userName){
+        PostTest postTest = new PostTest();
+        postTest.setAverageScore(averageScore);
+        postTest.setUserName(userName);
         posttestServiceImplementation.createPosttest(userName, postTest);
         posttestServiceImplementation.updateUserProficiency(userName);
     }
 
     @PostMapping("/createPreTest/{userName}")
-    public void createPreTest(@RequestBody Pretest preTest, @PathVariable String userName){
-        pretestServiceImplementation.createPretest(preTest,userName);
+    public void createPreTest(@RequestBody float averageScore, @PathVariable String userName){
+        Pretest pretest = new Pretest();
+        pretest.setAverageScore(averageScore);
+        pretest.setUserName(userName);
+        pretestServiceImplementation.createPretest(pretest,userName);
         pretestServiceImplementation.updateUserProficiency(userName);
     }
 
