@@ -39,7 +39,7 @@ public class GradingService {
     public GradingResult grade(CodeSubmission submission) {
         String questionId = submission.getQuestionId();
         String code = submission.getCode();
-        String userId = submission.getUserId();
+        String userId = submission.getUserName();
 
         // --- NEW: Preliminary check for valid Java code structure ---
         if (!isLikelyJavaCode(code)) {
