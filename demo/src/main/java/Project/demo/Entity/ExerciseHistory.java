@@ -13,7 +13,7 @@ public class ExerciseHistory {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
-    private String userId;
+    private String userName;
     private int exerciseId;
     private String timeDone;
     private double score;

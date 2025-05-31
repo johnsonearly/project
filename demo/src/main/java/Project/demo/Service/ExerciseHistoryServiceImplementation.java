@@ -17,16 +17,8 @@ public class ExerciseHistoryServiceImplementation {
         return history;
     }
     public List<ExerciseHistory> fetchHistory(String userId){
-        return exerciseHistoryInterface.findAllByUserId(userId);
+        return exerciseHistoryInterface.findAllByUserName(userId);
     }
 
-    public double averageScore(String userId){
-        List<ExerciseHistory> history = fetchHistory(userId);
-        double sum = 0;
-        for (ExerciseHistory exerciseHistory : history) {
-            sum += exerciseHistory.getScore();
-        }
-        return sum / history.size();
-    }
 
 }

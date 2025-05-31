@@ -6,5 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface ExerciseHistoryInterface extends JpaRepository<ExerciseHistory,Integer> {
-    List<ExerciseHistory> findAllByUserId(String userId);
+
+    List<ExerciseHistory> findAllByUserName(String userId);
 }
