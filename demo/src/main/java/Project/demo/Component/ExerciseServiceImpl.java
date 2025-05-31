@@ -240,7 +240,7 @@ public class ExerciseServiceImpl {
 
         // Save the exercise history immediately
         ExerciseHistory history = new ExerciseHistory();
-        history.setUserId(userId);
+        history.setUserName(userId);
         history.setExerciseId(Integer.parseInt(exerciseId));
         history.setScore(score);
         history.setTimeDone(String.valueOf(System.currentTimeMillis()));
