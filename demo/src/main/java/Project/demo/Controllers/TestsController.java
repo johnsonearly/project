@@ -28,20 +28,15 @@ public class TestsController {
     @PostMapping("/createPostTest/{userName}")
     public void createPostTest(@RequestBody PostTest postTest, @PathVariable String userName){
         posttestServiceImplementation.createPosttest(userName, postTest);
+        posttestServiceImplementation.updateUserProficiency(userName);
     }
 
     @PostMapping("/createPreTest/{userName}")
     public void createPreTest(@RequestBody Pretest preTest, @PathVariable String userName){
         pretestServiceImplementation.createPretest(preTest,userName);
-    }
-
-    @PutMapping("/pretest/update/{userName}")
-    public void updateUser(@PathVariable String userName){
         pretestServiceImplementation.updateUserProficiency(userName);
     }
-    @PutMapping("/posttest/update/{userName}")
-    public void updateUserPostTest(@PathVariable String userName){
-        posttestServiceImplementation.updateUserProficiency(userName);
-    }
+
+
 
 }
