@@ -1,8 +1,10 @@
 package Project.demo.Service;
 
 
+import Project.demo.Entity.AppUser;
 import Project.demo.Entity.PostTest;
 import Project.demo.Entity.Pretest;
+import Project.demo.Repositories.AppUserInterface;
 import Project.demo.Repositories.PosttestInterface;
 import Project.demo.Repositories.PretestInterface;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +19,9 @@ public class PosttestServiceImplementation {
 
     @Autowired
     private PretestInterface pretestInterface;
+
+    @Autowired
+    private AppUserInterface appUserInterface;
 
     public void createPosttest(String userName, PostTest postTest){
         Optional<PostTest> postTest1 = Optional.ofNullable(posttestInterface.findByUserName(userName));
@@ -41,4 +46,21 @@ public class PosttestServiceImplementation {
         }
         return "Aww you can do better";
     }
+    public void updateUserProficiency(String userName) {
+        PostTest postTest = posttestInterface.findByUserName(userName);
+        float averageScore = postTest.getAverageScore();
+        Optional<AppUser> appUser = appUserInterface.findByUserName(userName);
+        if (appUser.isPresent()) {
+            if (averageScore <= 30) {
+                appUser.get().setProficiency("Beginner");
+                appUserInterface.save(appUser.get());
+            } else if (averageScore > 30 && averageScore <= 50) {
+                appUser.get().setProficiency("Intermediate");
+                appUserInterface.save(appUser.get());
+            }
+            appUser.get().setProficiency("Advanced");
+        }
+
+    }
 }
+

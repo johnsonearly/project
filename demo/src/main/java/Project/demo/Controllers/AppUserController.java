@@ -47,13 +47,13 @@ public class AppUserController {
         message.setData(userServiceImplementation.createUser(appUser));
         return  message;
     }
-
-    @PutMapping("update/{userId}")
-    public String updateUser(@PathVariable  String userId, @RequestBody String recommendedLevel){
-
-        return userServiceImplementation.updateUser(userId,recommendedLevel);
-
-    }
+//
+//    @PutMapping("update/{userId}")
+//    public String updateUser(@PathVariable  String userId, @RequestBody String recommendedLevel){
+//
+//        return userServiceImplementation.updateUser(userId,recommendedLevel);
+//
+//    }
 
     @PostMapping("login")
     public ResponseEntity<SuccessMessage<String>> loginUser(@RequestBody LoginDTO loginDTO) {
