@@ -23,7 +23,7 @@ public class GradingController {
     @PostMapping("/submit-code")
     public ResponseEntity<SuccessMessage<GradingResult>> gradeUser(@RequestBody CodeSubmission codeSubmission) {
         ExerciseHistory history = new ExerciseHistory();
-        history.setUserName(codeSubmission.getUserId());
+        history.setUserName(codeSubmission.getUserName());
         history.setTimeDone(codeSubmission.getTimeSpent());
         history.setExerciseId(Integer.parseInt(codeSubmission.getQuestionId()));
         history.setScore(gradingService.grade(codeSubmission).getScore());

@@ -6,7 +6,7 @@ import lombok.*;
 @AllArgsConstructor
 @NoArgsConstructor
 public class CodeSubmission {
-    private String userId;
+    private String userName;
     private String questionId;
     private String code;
     private String difficultyLevel;
