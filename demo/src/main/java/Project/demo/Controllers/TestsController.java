@@ -31,7 +31,7 @@ public class TestsController {
         postTest.setAverageScore(averageScore);
         postTest.setUserName(userName);
         posttestServiceImplementation.createPosttest(userName, postTest);
-        posttestServiceImplementation.updateUserProficiency(userName);
+
     }
 
     @PostMapping("/createPreTest/{userName}")
@@ -40,7 +40,6 @@ public class TestsController {
         pretest.setAverageScore(averageScore);
         pretest.setUserName(userName);
         pretestServiceImplementation.createPretest(pretest,userName);
-        pretestServiceImplementation.updateUserProficiency(userName);
     }
 
 

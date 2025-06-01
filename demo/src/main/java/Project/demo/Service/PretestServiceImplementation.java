@@ -20,18 +20,8 @@ public class PretestServiceImplementation {
 
     public void createPretest(Pretest pretest, String userName) {
         Optional<Pretest> pretest1 = Optional.ofNullable(pretestInterface.findByUserName(userName));
-        if (pretest1.isPresent()) {
-            pretest1.get().setAverageScore(pretest.getAverageScore());
-            pretestInterface.save(pretest1.get());
-        } else {
-            pretest.setUserName(userName);
-        }
-
+        pretest1.ifPresent(value -> pretestInterface.delete(value));
         pretestInterface.save(pretest);
-    }
-
-    public void updateUserProficiency(String userName) {
-        Pretest pretest = pretestInterface.findByUserName(userName);
         float averageScore = pretest.getAverageScore();
         Optional<AppUser> appUser = appUserInterface.findByUserName(userName);
         if (appUser.isPresent()) {
@@ -43,7 +33,9 @@ public class PretestServiceImplementation {
                 appUserInterface.save(appUser.get());
             }
             appUser.get().setProficiency("Advanced");
+            appUserInterface.save(appUser.get());
         }
-
     }
+
+
 }
