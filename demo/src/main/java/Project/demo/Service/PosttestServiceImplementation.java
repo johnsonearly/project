@@ -23,25 +23,30 @@ public class PosttestServiceImplementation {
     @Autowired
     private AppUserInterface appUserInterface;
 
-    public void createPosttest(String userName, PostTest postTest){
-        Optional<PostTest> postTest1 = Optional.ofNullable(posttestInterface.findByUserName(userName));
-        postTest1.ifPresent(test -> posttestInterface.delete(test));
-        posttestInterface.save(postTest);
-        float averageScore = postTest.getAverageScore();
-        Optional<AppUser> appUser = appUserInterface.findByUserName(userName);
-        if (appUser.isPresent()) {
-            if (averageScore <= 30) {
-                appUser.get().setProficiency("Beginner");
-                appUserInterface.save(appUser.get());
-            } else if (averageScore > 30 && averageScore <= 50) {
-                appUser.get().setProficiency("Intermediate");
-                appUserInterface.save(appUser.get());
-            }
-            appUser.get().setProficiency("Advanced");
-            appUserInterface.save(appUser.get());
-        }
+    public void createPosttest( String userName,PostTest pretest) {
+        Optional<PostTest> pretest1 = Optional.ofNullable(posttestInterface.findByUserName(userName));
+        pretest1.ifPresent(posttestInterface::delete);  // cleaner syntax
 
+        posttestInterface.save(pretest);
+
+        float averageScore = pretest.getAverageScore();
+        Optional<AppUser> appUser = appUserInterface.findByUserName(userName);
+
+        if (appUser.isPresent()) {
+            AppUser user = appUser.get();
+
+            if (averageScore <= 30) {
+                user.setProficiency("Beginner");
+            } else if (averageScore > 30 && averageScore <= 50) {
+                user.setProficiency("Intermediate");
+            } else {
+                user.setProficiency("Advanced");
+            }
+
+            appUserInterface.save(user);
+        }
     }
+
     public String evaluatePosttest(String userName){
         PostTest postTest = posttestInterface.findByUserName(userName);
         Pretest pretest = pretestInterface.findByUserName(userName);

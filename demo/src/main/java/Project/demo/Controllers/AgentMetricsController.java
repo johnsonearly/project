@@ -1,12 +1,10 @@
 package Project.demo.Controllers;
 
 import Project.demo.Component.QLearningAgent;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @CrossOrigin(origins = "https://learning-system-back-end-nzlz.vercel.app/")
@@ -18,9 +16,12 @@ public class AgentMetricsController {
         this.qLearningAgent = qLearningAgent;
     }
 
-    @GetMapping("/getmetrics")
-    public Map<String, Object> getAgentEvaluationMetrics() {
-        return qLearningAgent.getEvaluationMetrics();
+    @GetMapping("/getmetrics/{userName}")
+    public Map<String, Object> getAgentEvaluationMetrics(@PathVariable String userName) {
+        if (Objects.equals(userName, "johnsoncodes")) {
+            return qLearningAgent.getEvaluationMetrics();
+        }
+        return null;
     }
 
     @GetMapping("/reset")

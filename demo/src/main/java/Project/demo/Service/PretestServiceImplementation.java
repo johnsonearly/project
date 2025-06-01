@@ -20,22 +20,28 @@ public class PretestServiceImplementation {
 
     public void createPretest(Pretest pretest, String userName) {
         Optional<Pretest> pretest1 = Optional.ofNullable(pretestInterface.findByUserName(userName));
-        pretest1.ifPresent(value -> pretestInterface.delete(value));
+        pretest1.ifPresent(pretestInterface::delete);  // cleaner syntax
+
         pretestInterface.save(pretest);
+
         float averageScore = pretest.getAverageScore();
         Optional<AppUser> appUser = appUserInterface.findByUserName(userName);
+
         if (appUser.isPresent()) {
+            AppUser user = appUser.get();
+
             if (averageScore <= 30) {
-                appUser.get().setProficiency("Beginner");
-                appUserInterface.save(appUser.get());
+                user.setProficiency("Beginner");
             } else if (averageScore > 30 && averageScore <= 50) {
-                appUser.get().setProficiency("Intermediate");
-                appUserInterface.save(appUser.get());
+                user.setProficiency("Intermediate");
+            } else {
+                user.setProficiency("Advanced");
             }
-            appUser.get().setProficiency("Advanced");
-            appUserInterface.save(appUser.get());
+
+            appUserInterface.save(user);
         }
     }
+
 
 
 }
