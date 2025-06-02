@@ -39,7 +39,7 @@ public class PosttestServiceImplementation {
                 user.setProficiency("Beginner");
             } else if (averageScore > 30 && averageScore <= 50) {
                 user.setProficiency("Intermediate");
-            } else {
+            } else if (averageScore > 50 ){
                 user.setProficiency("Advanced");
             }
 

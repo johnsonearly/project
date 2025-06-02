@@ -16,12 +16,11 @@ public class AgentMetricsController {
         this.qLearningAgent = qLearningAgent;
     }
 
-    @GetMapping("/getmetrics/{userName}")
-    public Map<String, Object> getAgentEvaluationMetrics(@PathVariable String userName) {
-        if (Objects.equals(userName, "johnsoncodes")) {
+    @GetMapping("/getmetrics")
+    public Map<String, Object> getAgentEvaluationMetrics() {
+
             return qLearningAgent.getEvaluationMetrics();
-        }
-        return null;
+
     }
 
     @GetMapping("/reset")

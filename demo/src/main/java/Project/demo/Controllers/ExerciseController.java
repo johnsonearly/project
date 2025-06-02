@@ -61,52 +61,36 @@ public class ExerciseController {
      * before calling the /submit endpoint, to complete one evaluation cycle.
      *
      * GET /api/v1/exercises/personalized/{userId}
-     * @param userId The ID of the user for whom to get the exercise.
+     * @param userName The ID of the user for whom to get the exercise.
      * @return ResponseEntity containing a personalized ExerciseDTO or a 400/404/500 status.
      */
-    @GetMapping("/personalized/{userId}")
-    public ResponseEntity<ExerciseDTO> getPersonalizedExercise(@PathVariable String userId) {
-        if (userId == null || userId.trim().isEmpty()) {
+    @GetMapping("/personalized/{userName}")
+    public ResponseEntity<ExerciseDTO> getPersonalizedExercise(@PathVariable String userName) {
+        if (userName == null || userName.trim().isEmpty()) {
             logger.warn("Bad request: Personalized exercise requested with null or empty userId.");
             return ResponseEntity.badRequest().build(); // 400 Bad Request
         }
 
         try {
-            logger.info("Request received for personalized exercise for user: {}", userId);
+            logger.info("Request received for personalized exercise for user: {}", userName);
             // This method in service layer handles the Q-learning recommendation for the cycle
-            ExerciseDTO exercise = exerciseService.getExerciseForUser(userId);
+            ExerciseDTO exercise = exerciseService.getExerciseForUser(userName);
             if (exercise != null) {
                 logger.info("Serving personalized exercise {} (Difficulty: {}) for user {}.",
-                        exercise.getQuestionId(), exercise.getDifficulty(), userId);
+                        exercise.getQuestionId(), exercise.getDifficulty(), userName);
                 return ResponseEntity.ok(exercise);
             } else {
-                logger.warn("Failed to retrieve personalized exercise for user {}. No exercise found even after fallbacks. Consider checking exercise data.", userId);
+                logger.warn("Failed to retrieve personalized exercise for user {}. No exercise found even after fallbacks. Consider checking exercise data.", userName);
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).build(); // 404 Not Found if no exercise can be retrieved
             }
         } catch (Exception e) {
-            logger.error("Error retrieving personalized exercise for user {}: {}", userId, e.getMessage(), e);
+            logger.error("Error retrieving personalized exercise for user {}: {}", userName, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build(); // 500 Internal Server Error
         }
     }
 
 
-    /**
-     * Endpoint to get a list of personalized exercises for a user.
-     * This is useful for displaying multiple exercises at once, for example,
-     * on a dashboard or a practice session page. The difficulty of these exercises
-     * will be based on the Q-learning agent's overall recommended proficiency level
-     * for the user at the time of the request.
-     *
-     * Note: This endpoint does *not* participate directly in the 2-question evaluation cycle
-     * that updates the Q-learning agent's state based on performance. It simply fetches exercises
-     * based on the agent's *current best guess* of the user's proficiency for general practice.
-     * To trigger Q-learning updates, use the /personalized/{userId} and /submit endpoints.
-     *
-     * GET /api/v1/exercises/personalized-list/{userId}/{count}
-     * @param userId The ID of the user.
-     * @param count The number of personalized exercises to retrieve.
-     * @return ResponseEntity containing a list of ExerciseDTOs or an appropriate error status.
-     */
+
     @GetMapping("/personalized-list/{userId}/{count}")
     public ResponseEntity<List<ExerciseDTO>> getPersonalizedExerciseList(@PathVariable String userId,
                                                                          @PathVariable int count) {

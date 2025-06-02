@@ -16,8 +16,8 @@ public class ExerciseHistoryServiceImplementation {
         exerciseHistoryInterface.save(history);
         return history;
     }
-    public List<ExerciseHistory> fetchHistory(String userId){
-        return exerciseHistoryInterface.findAllByUserName(userId);
+    public List<ExerciseHistory> fetchHistory(String userName){
+        return exerciseHistoryInterface.findAllByUserName(userName);
     }
 
 

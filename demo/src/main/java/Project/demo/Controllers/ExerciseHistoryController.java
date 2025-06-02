@@ -15,10 +15,10 @@ public class ExerciseHistoryController {
     @Autowired
     ExerciseHistoryServiceImplementation historyServiceImplementation;
 
-    @GetMapping("{userId}")
-    public List<ExerciseHistory> getHistory(@PathVariable String userId){
-         System.out.println(historyServiceImplementation.fetchHistory(userId));
-         return historyServiceImplementation.fetchHistory(userId);
+    @GetMapping("{userName}")
+    public List<ExerciseHistory> getHistory(@PathVariable String userName){
+         System.out.println(historyServiceImplementation.fetchHistory(userName));
+         return historyServiceImplementation.fetchHistory(userName);
 
     }
     @PostMapping
