@@ -16,7 +16,7 @@ public class AgentMetricsController {
         this.qLearningAgent = qLearningAgent;
     }
 
-    @GetMapping("/getmetrics")
+    @GetMapping("/metrics")
     public Map<String, Object> getAgentEvaluationMetrics() {
 
             return qLearningAgent.getEvaluationMetrics();
