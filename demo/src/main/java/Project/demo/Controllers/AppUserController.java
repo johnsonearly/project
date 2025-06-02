@@ -48,10 +48,10 @@ public class AppUserController {
         return  message;
     }
 //
-//    @PutMapping("update/{userId}")
-//    public String updateUser(@PathVariable  String userId, @RequestBody String recommendedLevel){
+//    @PutMapping("update/{userName}")
+//    public String updateUser(@PathVariable  String userName, @RequestBody String recommendedLevel){
 //
-//        return userServiceImplementation.updateUser(userId,recommendedLevel);
+//        return userServiceImplementation.updateUser(userName,recommendedLevel);
 //
 //    }
 
@@ -71,7 +71,7 @@ public class AppUserController {
         return ResponseEntity.ok(message);
     }
 
-    @GetMapping("getUser/{userId}")
+    @GetMapping("getUser/{userName}")
     public AppUser getUser(@PathVariable String userId){
         return userServiceImplementation.getUser(userId);
     }

@@ -22,7 +22,7 @@ public class QLearningAgent {
     private static final String DEFAULT_DIFFICULTY = "Beginner"; // Used for new users or fallbacks
     private static final int NUM_DIFFICULTIES = VALID_DIFFICULTIES.size();
 
-    // Q-table: Map<userId, double[][]>
+    // Q-table: Map<userName, double[][]>
     private final ConcurrentHashMap<String, double[][]> qTables;
     // Map to track the *last chosen difficulty (action)* for each user
     // This is needed because the 'update' happens after the action (choosing difficulty) has been made and performance observed.

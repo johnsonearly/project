@@ -18,7 +18,7 @@ public class ResourceController {
     @Autowired
     private AppUserServiceImplementation serviceImplementation;
 
-    @GetMapping("getResource/{userId}")
+    @GetMapping("getResource/{userName}")
     public List<ResourcesDTO> getResources(@PathVariable String userId){
         String userLevel = serviceImplementation.getUser(userId).getProficiency();
         return service.getExercisesByLevel(userLevel);

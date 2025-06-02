@@ -34,7 +34,7 @@ public class ExerciseServiceImpl {
     private final AppUserInterface userRepository; // Assuming you still use this for direct user updates
 
     // Map to track user's current question cycle progress and the difficulty for that cycle
-    // Key: userId, Value: UserSessionState
+    // Key: userName, Value: UserSessionState
     private final Map<String, UserSessionState> userSessionStates = new ConcurrentHashMap<>();
 
     private static final String DEFAULT_DIFFICULTY = "Beginner";
@@ -234,7 +234,7 @@ public class ExerciseServiceImpl {
      */
     public void recordExerciseResult(String userId, String exerciseId, double score) {
         if (userId == null || exerciseId == null) {
-            logger.warn("Cannot record exercise result: userId or exerciseId is null.");
+            logger.warn("Cannot record exercise result: userName or exerciseId is null.");
             return;
         }
 
@@ -300,7 +300,7 @@ public class ExerciseServiceImpl {
      */
     public void recordUserFeedback(String userId, String exerciseId, String feedbackType) {
         if (userId == null || exerciseId == null || feedbackType == null) {
-            logger.warn("Cannot record user feedback: userId, exerciseId, or feedbackType is null.");
+            logger.warn("Cannot record user feedback: userName, exerciseId, or feedbackType is null.");
             return;
         }
 

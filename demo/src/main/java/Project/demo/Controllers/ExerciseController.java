@@ -60,14 +60,14 @@ public class ExerciseController {
      * IMPORTANT: The frontend should call this endpoint *twice* for a given user
      * before calling the /submit endpoint, to complete one evaluation cycle.
      *
-     * GET /api/v1/exercises/personalized/{userId}
+     * GET /api/v1/exercises/personalized/{userName}
      * @param userName The ID of the user for whom to get the exercise.
      * @return ResponseEntity containing a personalized ExerciseDTO or a 400/404/500 status.
      */
     @GetMapping("/personalized/{userName}")
     public ResponseEntity<ExerciseDTO> getPersonalizedExercise(@PathVariable String userName) {
         if (userName == null || userName.trim().isEmpty()) {
-            logger.warn("Bad request: Personalized exercise requested with null or empty userId.");
+            logger.warn("Bad request: Personalized exercise requested with null or empty userName.");
             return ResponseEntity.badRequest().build(); // 400 Bad Request
         }
 
@@ -91,11 +91,11 @@ public class ExerciseController {
 
 
 
-    @GetMapping("/personalized-list/{userId}/{count}")
+    @GetMapping("/personalized-list/{userName}/{count}")
     public ResponseEntity<List<ExerciseDTO>> getPersonalizedExerciseList(@PathVariable String userId,
                                                                          @PathVariable int count) {
         if (userId == null || userId.trim().isEmpty() || count <= 0) {
-            logger.warn("Bad request: Personalized exercise list requested with invalid userId or count. userId: {}, count: {}", userId, count);
+            logger.warn("Bad request: Personalized exercise list requested with invalid userName or count. userName: {}, count: {}", userId, count);
             return ResponseEntity.badRequest().build();
         }
 
@@ -124,17 +124,17 @@ public class ExerciseController {
      * for that cycle and then determine the next difficulty level.
      *
      * IMPORTANT: The frontend should call this endpoint *after each question*
-     * retrieved via `/personalized/{userId}`. The backend will handle when to trigger
+     * retrieved via `/personalized/{userName}`. The backend will handle when to trigger
      * the Q-learning update.
      *
      * POST /api/v1/exercises/submit
-     * @param result An ExerciseResultDTO containing userId, exerciseId, and score.
+     * @param result An ExerciseResultDTO containing userName, exerciseId, and score.
      * @return ResponseEntity indicating success (200 OK) or failure (400 Bad Request, 500 Internal Server Error).
      */
     @PostMapping("/submit")
     public ResponseEntity<Void> recordExerciseResult(@RequestBody ExerciseResultDTO result) {
         // Basic validation for the incoming result data
-        if (result == null || result.getUserId() == null || result.getUserId().trim().isEmpty() ||
+        if (result == null || result.getUserName() == null || result.getUserName().trim().isEmpty() ||
                 result.getExerciseId() == null || result.getExerciseId().trim().isEmpty() || result.getScore() < 0 || result.getScore() > 100) { // Added score range validation
             logger.warn("Bad request: Invalid exercise result submission. Result: {}", result);
             return ResponseEntity.badRequest().build(); // 400 Bad Request
@@ -142,17 +142,17 @@ public class ExerciseController {
 
         try {
             logger.info("Exercise result submission received for user {}: Exercise ID '{}', Score: {}",
-                    result.getUserId(), result.getExerciseId(), result.getScore());
+                    result.getUserName(), result.getExerciseId(), result.getScore());
 
             exerciseService.recordExerciseResult(
-                    result.getUserId(),
+                    result.getUserName(),
                     result.getExerciseId(),
                     result.getScore()
             );
-            logger.info("Exercise result recorded successfully for user {}. Service layer handled Q-learning update if cycle complete.", result.getUserId());
+            logger.info("Exercise result recorded successfully for user {}. Service layer handled Q-learning update if cycle complete.", result.getUserName());
             return ResponseEntity.ok().build(); // 200 OK
         } catch (Exception e) {
-            logger.error("Error recording exercise result for user {}: {}", result.getUserId(), e.getMessage(), e);
+            logger.error("Error recording exercise result for user {}: {}", result.getUserName(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build(); // 500 Internal Server Error
         }
     }

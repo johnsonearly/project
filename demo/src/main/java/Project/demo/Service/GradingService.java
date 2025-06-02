@@ -33,7 +33,7 @@ public class GradingService {
      * It no longer directly interacts with QLearningAgent or ProficiencyTracker to update user states;
      * that responsibility now lies with ExerciseServiceImpl after grading.
      *
-     * @param submission The CodeSubmission object containing code, questionId, userId, and difficulty.
+     * @param submission The CodeSubmission object containing code, questionId, userName, and difficulty.
      * @return A GradingResult object with score, classification, and detailed feedback.
      */
     public GradingResult grade(CodeSubmission submission) {

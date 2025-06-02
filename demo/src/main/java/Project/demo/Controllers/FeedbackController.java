@@ -11,7 +11,7 @@ public class FeedbackController {
     @Autowired
     private QLearningAgent learningAgent;
 
-    @PostMapping("/feedback/{userId}/{difficulty}/{feedback}")
+    @PostMapping("/feedback/{userName}/{difficulty}/{feedback}")
     public void update(@PathVariable String userId, @PathVariable String difficulty, @PathVariable String feedback){
         learningAgent.updateQValuesBasedOnFeedback(userId, difficulty, feedback);
     }
