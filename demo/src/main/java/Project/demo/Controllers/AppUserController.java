@@ -72,8 +72,8 @@ public class AppUserController {
     }
 
     @GetMapping("getUser/{userName}")
-    public AppUser getUser(@PathVariable String userId){
-        return userServiceImplementation.getUser(userId);
+    public AppUser getUser(@PathVariable String userName){
+        return userServiceImplementation.getUser(userName);
     }
 
 

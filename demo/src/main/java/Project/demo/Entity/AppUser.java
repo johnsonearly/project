@@ -17,7 +17,9 @@ public class AppUser {
     private UserRole role;
     private String password;
     private String proficiency ;
-
+    private boolean pretestDone;
+    private boolean postTestDone;
+    private boolean adaptiveExerciseDone;
 
 
 
