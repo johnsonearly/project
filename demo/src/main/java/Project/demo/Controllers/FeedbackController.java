@@ -12,7 +12,7 @@ public class FeedbackController {
     private QLearningAgent learningAgent;
 
     @PostMapping("/feedback/{userName}/{difficulty}/{feedback}")
-    public void update(@PathVariable String userId, @PathVariable String difficulty, @PathVariable String feedback){
-        learningAgent.updateQValuesBasedOnFeedback(userId, difficulty, feedback);
+    public void update(@PathVariable String userName, @PathVariable String difficulty, @PathVariable String feedback){
+        learningAgent.updateQValuesBasedOnFeedback(userName, difficulty, feedback);
     }
 }
