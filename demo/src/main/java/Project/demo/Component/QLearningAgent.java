@@ -107,9 +107,9 @@ public class QLearningAgent {
     private double calculateReward(double averageScore) {
         double normalizedScore = averageScore / 100.0;
 
-        if (normalizedScore >= 0.9) { // Perfect or near-perfect score
+        if (normalizedScore >= 0.5) { // Perfect or near-perfect score
             return 10.0; // Strong positive reward
-        } else if (normalizedScore >= 0.6) { // Good score (e.g., > 60%)
+        } else if (normalizedScore >= 0.3) { // Good score (e.g., > 60%)
             return 5.0;  // Moderate positive reward
         } else if (normalizedScore > 0.0) { // Partial score (e.g., 1% - 59%)
             return -2.0; // Small penalty for not mastering
@@ -503,20 +503,6 @@ public class QLearningAgent {
         long totalFeedback = totalLikesFeedback + totalDislikesFeedback;
         metrics.put("feedbackLikeRatio", totalFeedback > 0 ? String.format("%.2f", (double) totalLikesFeedback / totalFeedback) : "N/A");
         metrics.put("feedbackDislikeRatio", totalFeedback > 0 ? String.format("%.2f", (double) totalDislikesFeedback / totalFeedback) : "N/A");
-
-        // 4. Progression Metrics (Global Summary)
-        long totalUpgrades = userProgressionCounts.values().stream().mapToInt(counts -> counts[0]).sum();
-        long totalDowngrades = userProgressionCounts.values().stream().mapToInt(counts -> counts[1]).sum();
-        long totalStayedSame = userProgressionCounts.values().stream().mapToInt(counts -> counts[2]).sum();
-
-        metrics.put("totalDifficultyUpgrades", totalUpgrades);
-        metrics.put("totalDifficultyDowngrades", totalDowngrades);
-        metrics.put("totalDifficultyStayedSame", totalStayedSame);
-
-        long totalUserTransitions = totalUpgrades + totalDowngrades + totalStayedSame;
-        metrics.put("upgradeRatio", totalUserTransitions > 0 ? String.format("%.2f", (double) totalUpgrades / totalUserTransitions) : "N/A");
-        metrics.put("downgradeRatio", totalUserTransitions > 0 ? String.format("%.2f", (double) totalDowngrades / totalUserTransitions) : "N/A");
-        metrics.put("staySameRatio", totalUserTransitions > 0 ? String.format("%.2f", (double) totalStayedSame / totalUserTransitions) : "N/A");
 
         // Current distribution of users by proficiency
         Map<String, Long> userProficiencyDistribution = userLastChosenDifficultyIndex.values().stream()
